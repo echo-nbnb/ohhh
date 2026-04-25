@@ -410,7 +410,7 @@ git add .
 git commit -m "[vision] 添加 YOLO 识别模块"
 
 # 4. 推送到 GitHub（首次推送会要求输入用户名和 Token）
-git push origin dev
+git push
 ```
 
 > **Token 获取方式**：GitHub → 右上角头像 → Settings → Developer settings → Personal access tokens → Generate new token（勾选 repo 项）
