@@ -393,8 +393,8 @@ cd ohhh
 #### 每天开始工作前（拉取最新代码）
 
 ```bash
-git checkout dev
-git pull origin dev
+git checkout
+git pull
 ```
 
 #### 修改文件后，提交并推送到 GitHub
@@ -430,7 +430,7 @@ git checkout -b feature/你的名字
 #### 合并他人更新到当前分支
 
 ```bash
-git pull origin dev
+git pull
 ```
 
 ---
