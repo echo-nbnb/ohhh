@@ -1,4 +1,10 @@
+# 视觉识别
 opencv-python
 numpy
 pillow
 mediapipe
+
+# YOLO 训练
+ultralytics
+torch
+torchvision
