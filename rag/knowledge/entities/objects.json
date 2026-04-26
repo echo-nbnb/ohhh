@@ -1,0 +1,14 @@
+{
+  "_template": "物象实体模板",
+  "_description": "每个物象实体的JSON结构",
+  "_example": {
+    "书院": {
+      "type": "object",
+      "description": "千年学府，读书讲学之地",
+      "symbolism": "求知、传承、讲学",
+      "related_entities": ["岳麓绿", "张栻"],
+      "historical_context": "岳麓书院，创建于976年，朱熹、张栻曾在此讲学"
+    }
+  },
+  "_TODO": "请填充物象实体"
+}

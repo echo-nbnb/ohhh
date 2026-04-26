@@ -1,0 +1,15 @@
+{
+  "_template": "颜色实体模板",
+  "_description": "每个颜色实体的JSON结构",
+  "_example": {
+    "岳麓绿": {
+      "type": "color",
+      "description": "绿色，生命的颜色",
+      "color": "#2E7D32",
+      "symbolism": "生长、传承、根脉",
+      "related_entities": ["书院", "古树"],
+      "historical_context": "岳麓书院千年古木，象征学问传承"
+    }
+  },
+  "_TODO": "请填充12个模块对应的颜色实体"
+}
