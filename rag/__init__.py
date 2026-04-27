@@ -21,6 +21,8 @@ RAG 模块
     cloud_data = rag.prepare_for_cloud(context)
 """
 
+from typing import Dict, List
+
 from .retriever import (
     RAGRetriever,
     KnowledgeBase,

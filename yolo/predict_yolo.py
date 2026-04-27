@@ -19,6 +19,12 @@ sys.path.insert(0, '..')
 from ultralytics import YOLO
 from vision import IPCamera
 
+# 默认摄像头地址
+try:
+    from config_ipcam import CAMERA_URL as DEFAULT_CAMERA
+except ImportError:
+    DEFAULT_CAMERA = "http://10.54.71.31:8080/video"
+
 
 def main():
     parser = argparse.ArgumentParser(description='YOLO 模块检测')
@@ -28,7 +34,7 @@ def main():
     parser.add_argument('--source', type=str, default='0',
                        help='图片来源: 0=摄像头, 文件路径, 或视频路径')
     parser.add_argument('--camera', type=str,
-                       default='http://10.7.46.53:8080/video',
+                       default=DEFAULT_CAMERA,
                        help='IP摄像头地址')
     parser.add_argument('--conf', type=float, default=0.5,
                        help='置信度阈值')

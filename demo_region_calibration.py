@@ -5,7 +5,7 @@
 
 使用方法:
     python demo_region_calibration.py
-    python demo_region_calibration.py http://10.7.46.53:8080/video
+    python demo_region_calibration.py
 """
 
 import sys
@@ -162,7 +162,11 @@ def main():
     if len(sys.argv) > 1:
         camera_url = sys.argv[1]
     else:
-        camera_url = "http://10.7.46.53:8080/video"
+        try:
+            from config_ipcam import CAMERA_URL
+            camera_url = CAMERA_URL
+        except ImportError:
+            camera_url = "http://10.54.71.31:8080/video"
 
     print("\n" + "=" * 50)
     print("区域标定Demo - 选择标定方式")

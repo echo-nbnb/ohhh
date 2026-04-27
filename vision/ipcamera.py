@@ -11,20 +11,23 @@ from typing import Optional, Tuple
 class IPCamera:
     """IP摄像头连接类"""
 
-    def __init__(self, url: str, timeout: int = 5000):
+    def __init__(self, url: str, timeout: int = 5000, target_width: int = 640, target_height: int = 480):
         """
         初始化IP摄像头连接
 
         Args:
-            url: 摄像头的RTSP或HTTP地址，例如:
-                 - rtsp://192.168.1.100:8080/h264_ulaw.sdp
-                 - http://192.168.1.100:8080/video
+            url: 摄像头的RTSP或HTTP地址
             timeout: 连接超时时间（毫秒）
+            target_width: 目标宽度（降低分辨率）
+            target_height: 目标高度（降低分辨率）
         """
         self.url = url
         self.timeout = timeout
+        self.target_width = target_width
+        self.target_height = target_height
         self._cap: Optional[cv2.VideoCapture] = None
         self._is_connected = False
+        self._frame_count = 0
 
     def connect(self) -> bool:
         """
@@ -37,10 +40,15 @@ class IPCamera:
             self._cap = cv2.VideoCapture(self.url)
             self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 减少缓冲
             self._cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, self.timeout)
-
+            # 尝试降低分辨率（不一定所有摄像头都支持）
+            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.target_width)
+            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.target_height)
             # 测试连接
             if self._cap.isOpened():
                 self._is_connected = True
+                actual_w = self._cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                actual_h = self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                print(f"[IPCam] 分辨率: {actual_w}x{actual_h}")
                 return True
             else:
                 self._is_connected = False
@@ -56,7 +64,7 @@ class IPCamera:
 
     def read_frame(self) -> Optional[np.ndarray]:
         """
-        读取一帧图像
+        读取一帧图像，自动缩放到目标分辨率
 
         Returns:
             numpy数组格式的图像（BGR格式），读取失败返回None
@@ -66,6 +74,10 @@ class IPCamera:
 
         ret, frame = self._cap.read()
         if ret:
+            self._frame_count += 1
+            # 如果实际分辨率比目标大，缩放
+            if frame.shape[1] > self.target_width or frame.shape[0] > self.target_height:
+                frame = cv2.resize(frame, (self.target_width, self.target_height))
             return frame
         return None
 
@@ -113,7 +125,7 @@ class IPCameraManager:
         Args:
             name: 摄像头名称/标识
             url: 摄像头地址
-            timeout: 超时时间（毫秒）
+            timeout: 超时时间
 
         Returns:
             是否添加成功

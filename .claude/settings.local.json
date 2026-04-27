@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(ls -la vision/*.task)",
+      "Bash(ls -la *.task)",
+      "Bash(findstr \"8888 8889\")",
+      "Bash(findstr \"8889\")",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(curl:*)",
+      "WebFetch(domain:raw.githubusercontent.com)"
+    ]
+  }
+}

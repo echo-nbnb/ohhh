@@ -19,6 +19,12 @@ sys.path.insert(0, '..')
 
 from vision import IPCamera
 
+# 默认摄像头地址
+try:
+    from config_ipcam import CAMERA_URL as DEFAULT_CAMERA
+except ImportError:
+    DEFAULT_CAMERA = "http://10.54.71.31:8080/video"
+
 
 def main():
     parser = argparse.ArgumentParser(description='采集模块图片用于YOLO训练')
@@ -27,7 +33,7 @@ def main():
     parser.add_argument('--val', action='store_true',
                        help='保存到验证集 ../dataset/images/val')
     parser.add_argument('--camera', type=str,
-                       default='http://10.7.46.53:8080/video',
+                       default=DEFAULT_CAMERA,
                        help='摄像头地址')
     parser.add_argument('--interval', type=int, default=0,
                        help='自动拍摄间隔（秒），0=手动拍摄')
