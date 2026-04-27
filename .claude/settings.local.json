@@ -9,7 +9,13 @@
       "WebSearch",
       "WebFetch(domain:github.com)",
       "Bash(curl:*)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(ls:*)",
+      "Bash(\"D:\\\\softwares\\\\anaconda\\\\envs\\\\ohhh\\\\python.exe\" -m pip install ultralytics==8.0.0 --force-reinstall --no-cache-dir)",
+      "Bash(\"D:\\\\softwares\\\\anaconda\\\\envs\\\\ohhh\\\\python.exe\" -m pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cu121 --force-reinstall)",
+      "Bash(D:\\\\softwares\\\\anaconda\\\\envs\\\\ohhh\\\\python.exe:*)",
+      "Bash(\"D:\\\\softwares\\\\anaconda\\\\envs\\\\ohhh\\\\python.exe\" -m pip install --upgrade ultralytics --no-cache-dir)",
+      "Bash(\"D:\\\\softwares\\\\anaconda\\\\envs\\\\ohhh\\\\python.exe\" \"D:\\\\projects\\\\ohhh\\\\yolo\\\\train_yolo_manual.py\")"
     ]
   }
 }

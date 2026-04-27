@@ -7,6 +7,11 @@ YOLO 模型训练脚本
     python train_yolo.py
 """
 
+import os
+# Windows multiprocessing fix - must be before any torch imports
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+
 import sys
 sys.path.insert(0, '..')
 
@@ -35,17 +40,20 @@ def main():
     print()
 
     results = model.train(
-        data='dataset.yaml',      # 数据集配置
+        data=os.path.join(os.path.dirname(__file__), 'dataset.yaml'),  # 数据集配置（绝对路径）
         epochs=100,               # 训练轮数，可根据效果调整
         imgsz=640,                # 输入图片尺寸
-        batch=16,                 # 批次大小（4060建议16-32）
+        batch=8,                  # 批次大小
         device=0,                 # 使用GPU 0
-        project='../runs/detect', # 输出目录
+        project=os.path.join(os.path.dirname(__file__), '..', 'runs', 'detect'),  # 输出目录
         name='module_detector',   # 项目名称
         exist_ok=True,            # 允许覆盖已有结果
         verbose=True,             # 显示详细输出
         save=True,                # 保存模型
         save_period=10,           # 每10轮保存一次
+        amp=False,                # 禁用混合精度以提高稳定性
+        workers=0,                # 禁用多进程数据加载 (Windows 兼容性)
+        deterministic=True,       # 确定性训练
     )
 
     print("\n" + "=" * 50)

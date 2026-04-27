@@ -1,13 +1,7 @@
-# YOLO 数据集配置文件
-# 使用方法：将训练图片放入 ../dataset/images/train，标注文件放入 ../dataset/labels/train
-
 path: ../dataset
 train: images/train
 val: images/val
 
-# 类别数量
 nc: 1
-
-# 类别名称
 names:
-  0: module
+  0: m
