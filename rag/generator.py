@@ -1,16 +1,22 @@
 """
 RAG 生成模块
-负责调用本地小模型或云端API生成叙事内容
+负责调用阿里云百炼API生成叙事内容和图像
 """
 
 import json
-from typing import List, Dict, Optional
+import os
+import base64
+from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
+from urllib.parse import urlparse, unquote
+from pathlib import PurePosixPath
 
 # 阿里云百炼 API
 try:
     import dashscope
-    from dashscope import Generation
+    from dashscope import Generation, ImageSynthesis
+    from http import HTTPStatus
+    import requests
     DASHSCOPE_AVAILABLE = True
 except ImportError:
     DASHSCOPE_AVAILABLE = False
@@ -26,10 +32,15 @@ class GenerationConfig:
     # 模型选择
     realtime_model: str = "qwen-turbo"      # 实时侧用小模型（快）
     narrative_model: str = "qwen-plus"      # 叙事卡用中等模型（质量）
+    image_model: str = "qwen-image-2.0-pro"  # 图像生成模型
 
     # 生成参数
     max_tokens: int = 500
     temperature: float = 0.7
+
+    # 图像参数
+    image_size: str = "1024*1024"  # 默认分辨率
+    image_n: int = 1               # 生成数量
 
 
 class AliCloudGenerator:
@@ -42,10 +53,13 @@ class AliCloudGenerator:
         self.config = config
         if DASHSCOPE_AVAILABLE and config.api_key:
             dashscope.api_key = config.api_key
+        # 设置API地址（北京地域）
+        if DASHSCOPE_AVAILABLE:
+            dashscope.base_http_api_url = 'https://dashscope.aliyuncs.com/api/v1'
 
     def _call_model(self, model: str, prompt: str, max_tokens: int = 500, temperature: float = 0.7) -> str:
         """
-        调用阿里云百炼模型
+        调用阿里云百炼文本模型
 
         Args:
             model: 模型名称
@@ -75,6 +89,52 @@ class AliCloudGenerator:
         except Exception as e:
             print(f"[错误] API调用异常: {e}")
             return ""
+
+    def _download_image(self, image_url: str, save_path: str = None) -> Tuple[Optional[str], Optional[str]]:
+        """
+        下载图像到本地
+
+        Args:
+            image_url: 图像URL
+            save_path: 保存路径（可选）
+
+        Returns:
+            (local_path, base64_string) 或 (None, None)
+        """
+        if not save_path:
+            # 从URL提取文件名
+            parsed = urlparse(image_url)
+            filename = PurePosixPath(unquote(parsed.path)).parts[-1]
+            save_path = f"./temp_{filename}"
+
+        try:
+            response = requests.get(image_url, stream=True, timeout=30)
+            response.raise_for_status()
+            with open(save_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            return save_path, None
+        except Exception as e:
+            print(f"[错误] 图像下载失败: {e}")
+            return None, None
+
+    def _encode_image_to_base64(self, image_path: str) -> Optional[str]:
+        """
+        将图像编码为Base64
+
+        Args:
+            image_path: 图像路径
+
+        Returns:
+            Base64字符串，格式: data:image/png;base64,xxx
+        """
+        try:
+            with open(image_path, 'rb') as f:
+                encoded = base64.b64encode(f.read()).decode('utf-8')
+            return f"data:image/png;base64,{encoded}"
+        except Exception as e:
+            print(f"[错误] Base64编码失败: {e}")
+            return None
 
     def generate_realtime_description(self, entity_name: str, entity_context: Dict) -> str:
         """
@@ -272,6 +332,96 @@ class AliCloudGenerator:
             temperature=0.7
         )
 
+    def generate_image(self, prompt: str, size: str = None, n: int = 1) -> Dict:
+        """
+        调用千问图像生成模型生成图像
+
+        Args:
+            prompt: 图像提示词（英文）
+            size: 分辨率，如 "1024*1024"
+            n: 生成数量
+
+        Returns:
+            {
+                "status": "success" / "error",
+                "image_url": "https://...",        # URL，仅24小时有效
+                "local_path": "./xxx.png",          # 本地路径
+                "base64": "data:image/png;base64,...",  # Base64
+                "error": "错误信息"
+            }
+        """
+        if not DASHSCOPE_AVAILABLE:
+            return {
+                "status": "error",
+                "error": "dashscope未安装"
+            }
+
+        if not self.config.api_key:
+            return {
+                "status": "error",
+                "error": "未配置API_KEY"
+            }
+
+        size = size or self.config.image_size
+        n = n or self.config.image_n
+
+        try:
+            response = ImageSynthesis.call(
+                api_key=self.config.api_key,
+                model=self.config.image_model,
+                prompt=prompt,
+                size=size,
+                n=n,
+                prompt_extend=True,  # 开启提示词优化
+                watermark=False,
+                negative_prompt="低分辨率，低画质，肢体畸形，手指畸形，画面过饱和，蜡像感，人脸无细节，过度光滑，画面具有AI感。构图混乱。文字模糊，扭曲。",
+            )
+
+            if response.status_code == HTTPStatus.OK:
+                results = []
+                for result in response.output.results:
+                    image_url = result.url
+
+                    # 下载图像
+                    local_path, _ = self._download_image(image_url)
+                    base64_str = None
+                    if local_path:
+                        base64_str = self._encode_image_to_base64(local_path)
+
+                    results.append({
+                        "image_url": image_url,
+                        "local_path": local_path,
+                        "base64": base64_str
+                    })
+
+                return {
+                    "status": "success",
+                    "images": results
+                }
+            else:
+                return {
+                    "status": "error",
+                    "error": f"API调用失败: {response.message}"
+                }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": f"图像生成异常: {str(e)}"
+            }
+
+    def generate_image_sync(self, prompt: str, size: str = None) -> Dict:
+        """
+        同步调用千问图像生成（同步接口，阻塞等待）
+
+        Args:
+            prompt: 图像提示词（英文）
+            size: 分辨率
+
+        Returns:
+            同generate_image
+        """
+        return self.generate_image(prompt, size, n=1)
+
 
 class LocalGenerator:
     """
@@ -378,6 +528,19 @@ class NarrativeGenerator:
                 "summary": ""
             }
 
+    def generate_image(self, prompt: str, size: str = None) -> Dict:
+        """
+        生成图像
+
+        Args:
+            prompt: 图像提示词
+            size: 分辨率
+
+        Returns:
+            图像结果字典
+        """
+        return self.ali_gen.generate_image(prompt, size)
+
 
 def create_generator(config: GenerationConfig = None) -> NarrativeGenerator:
     """
@@ -402,7 +565,42 @@ def create_config(api_key: str = None) -> GenerationConfig:
     Returns:
         GenerationConfig实例
     """
-    import os
     return GenerationConfig(
         api_key=api_key or os.getenv("DASHSCOPE_API_KEY", "")
     )
+
+
+# 测试函数
+def test_image_generation():
+    """测试图像生成"""
+    config = create_config()
+    generator = NarrativeGenerator(config)
+
+    # 测试prompt生成
+    test_context = {
+        "modules": [
+            {"entity": "岳麓绿", "type": "color", "description": "生命的颜色"},
+            {"entity": "书院", "type": "object", "description": "千年学府"}
+        ],
+        "connections": []
+    }
+
+    prompt = generator.ali_gen.generate_image_prompt(test_context)
+    print(f"生成的提示词: {prompt}")
+
+    # 测试图像生成
+    print("\n开始生成图像...")
+    result = generator.generate_image(prompt)
+
+    if result["status"] == "success":
+        for i, img in enumerate(result["images"]):
+            print(f"\n图像{i+1}:")
+            print(f"  URL: {img['image_url']}")
+            print(f"  本地路径: {img['local_path']}")
+            print(f"  Base64长度: {len(img['base64']) if img['base64'] else 0}")
+    else:
+        print(f"生成失败: {result['error']}")
+
+
+if __name__ == "__main__":
+    test_image_generation()
