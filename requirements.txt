@@ -8,3 +8,6 @@ mediapipe
 ultralytics
 torch
 torchvision
+
+# 阿里云百炼
+dashscope
