@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-YOLO 模型预测脚本
-使用训练好的模型检测模块
+YOLO 模型预测 / 多目标跟踪脚本
+使用训练好的模型检测模块，内置 BoT-SORT 跟踪器保持跨帧 ID 一致
 
 使用方法:
     python predict_yolo.py                           # 使用默认摄像头
     python predict_yolo.py --model best.pt          # 指定模型
     python predict_yolo.py --source image.jpg        # 检测图片
     python predict_yolo.py --source 0                # 使用默认摄像头
+    python predict_yolo.py --no-track               # 仅检测，不使用跟踪
 """
 
 import sys
@@ -40,6 +41,8 @@ def main():
                        help='置信度阈值')
     parser.add_argument('--save', action='store_true',
                        help='保存检测结果')
+    parser.add_argument('--no-track', action='store_true',
+                       help='禁用多目标跟踪（仅逐帧检测）')
 
     args = parser.parse_args()
 
@@ -71,13 +74,13 @@ def main():
             if frame is None:
                 continue
 
-            # 检测
-            results = model.predict(frame, conf=args.conf, verbose=False)
+            if args.no_track:
+                results = model.predict(frame, conf=args.conf, verbose=False)
+            else:
+                results = model.track(frame, conf=args.conf, persist=True, verbose=False)
 
-            # 绘制结果
             annotated = results[0].plot()
-
-            cv2.imshow("YOLO Detection", annotated)
+            cv2.imshow("YOLO Detection" if args.no_track else "YOLO Tracking", annotated)
 
             if cv2.waitKey(1) & 0xFF == 27:
                 break
@@ -88,7 +91,10 @@ def main():
     else:
         # 检测图片或视频
         print(f"检测来源: {args.source}")
-        results = model.predict(args.source, conf=args.conf, save=args.save)
+        if args.no_track:
+            results = model.predict(args.source, conf=args.conf, save=args.save)
+        else:
+            results = model.track(args.source, conf=args.conf, save=args.save)
 
         if args.save:
             print(f"结果已保存到: {results[0].save_dir}")

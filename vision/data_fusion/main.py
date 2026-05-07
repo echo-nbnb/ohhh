@@ -104,7 +104,7 @@ class DataFusionServer:
             return []
 
         try:
-            results = self.yolo_model_handle.predict(frame, conf=0.5, verbose=False)
+            results = self.yolo_model_handle.track(frame, conf=0.5, persist=True, verbose=False)
             detections = []
 
             if len(results) > 0 and results[0].boxes is not None:
@@ -114,6 +114,7 @@ class DataFusionServer:
                     conf = float(box.conf[0])
                     cls = int(box.cls[0])
                     cls_name = results[0].names[cls]
+                    track_id = int(box.id[0]) if box.id is not None else None
 
                     detections.append({
                         'class_id': cls,
@@ -121,6 +122,7 @@ class DataFusionServer:
                         'confidence': conf,
                         'bbox': (int(x1), int(y1), int(x2 - x1), int(y2 - y1)),
                         'center': (int((x1 + x2) / 2), int((y1 + y2) / 2)),
+                        'track_id': track_id,
                         'timestamp': time.time()
                     })
 
@@ -196,7 +198,10 @@ class DataFusionServer:
                     for det in self.latest_yolo_results:
                         x, y, w, h = det['bbox']
                         cv2.rectangle(display, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                        cv2.putText(display, det['class_name'], (x, y-5),
+                        label = f"{det['class_name']}"
+                        if det.get('track_id') is not None:
+                            label += f" ID:{det['track_id']}"
+                        cv2.putText(display, label, (x, y-5),
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
                     cv2.imshow("DataFusion Preview", display)
 

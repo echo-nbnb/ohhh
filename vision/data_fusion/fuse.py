@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 数据融合模块
-将YOLO视觉定位结果与ESP32模块ID进行融合
+将YOLO视觉检测结果与ESP32模块数据进行融合
 
-融合逻辑：
-1. YOLO检测到模块的坐标位置
-2. ESP32上报模块的ID和触摸状态
-3. 根据位置将模块ID与坐标关联，输出完整的模块数据
+融合策略（YOLO为主，ESP32为备）：
+1. YOLO检测到模块的坐标位置和类型（主数据源）
+2. ESP32上报模块的ID和触摸状态（辅助确认）
+3. 根据位置将YOLO检测结果与ESP32数据关联
+4. 无YOLO检测时，使用ESP32数据（降级模式）
 """
 
 import numpy as np
@@ -32,6 +33,7 @@ class YOLODetection:
     confidence: float        # 置信度
     bbox: Tuple[int, int, int, int]  # (x, y, w, h)
     center: Tuple[int, int]  # 中心点 (x, y)
+    track_id: Optional[int] = None  # 多目标跟踪ID（跨帧一致）
     timestamp: float = 0    # 检测时间戳
 
 
@@ -54,6 +56,7 @@ class FusedModuleData:
     touch_state: bool           # 触摸状态
     confidence: float = 1.0     # 置信度
     bbox: Optional[Tuple[int, int, int, int]] = None  # 边界框
+    track_id: Optional[int] = None  # MOT跟踪ID（跨帧一致，用于多模块区分）
     timestamp: float = 0        # 时间戳
 
 
@@ -65,14 +68,17 @@ class DataFusion:
 
     def __init__(self,
                  max_distance: int = 100,
-                 id_mapping: Optional[Dict[int, ModuleType]] = None):
+                 id_mapping: Optional[Dict[int, ModuleType]] = None,
+                 yolo_primary: bool = True):
         """
         Args:
             max_distance: 模块ID与检测位置的最大匹配距离（像素）
             id_mapping: YOLO class_id 到 ModuleType 的映射
+            yolo_primary: True=YOLO为主（默认），False=ESP32为主
         """
         self.max_distance = max_distance
         self.id_mapping = id_mapping or self._default_id_mapping()
+        self.yolo_primary = yolo_primary
 
         # 存储当前帧的检测结果和模块数据
         self.current_detections: List[YOLODetection] = []
@@ -115,6 +121,7 @@ class DataFusion:
                 confidence=det.get('confidence', 0),
                 bbox=bbox,
                 center=center,
+                track_id=det.get('track_id'),
                 timestamp=det.get('timestamp', 0)
             )
             self.current_detections.append(detection)
@@ -186,11 +193,96 @@ class DataFusion:
         """
         执行数据融合
 
+        YOLO为主模式：
+        - 以YOLO检测为主数据源，直接使用YOLO的坐标和类型
+        - ESP32数据用于辅助确认（如触摸状态）
+
         Returns:
             融合后的模块数据列表
         """
         self.fused_modules = []
 
+        if self.yolo_primary:
+            # YOLO为主模式
+            self._fuse_yolo_primary()
+        else:
+            # ESP32为主模式（原逻辑）
+            self._fuse_esp32_primary()
+
+        return self.fused_modules
+
+    def _fuse_yolo_primary(self):
+        """
+        YOLO为主的数据融合
+
+        1. YOLO检测结果直接作为主数据
+        2. 尝试匹配ESP32数据获取触摸状态
+        3. 无ESP32匹配时，触摸状态默认False
+        """
+        matched_esp32_ids = set()
+
+        for det in self.current_detections:
+            # 从YOLO检测直接创建融合数据
+            # 尝试从ESP32获取触摸状态
+            touch_state = False
+            # 优先用 track_id 生成模块ID（保证跨帧一致），无 tracker 时降级到坐标
+            if det.track_id is not None:
+                matched_module_id = f"yolo_track_{det.track_id}"
+            else:
+                matched_module_id = f"yolo_{det.class_id}_{det.center[0]}_{det.center[1]}"
+
+            # 尝试匹配ESP32数据（根据位置匹配）
+            for module_id, module_data in self.current_modules.items():
+                if not module_data.online:
+                    continue
+                if module_id in self.position_cache:
+                    cached_pos = self.position_cache[module_id]
+                    distance = self._calculate_distance(det.center, cached_pos)
+                    if distance < self.max_distance:
+                        touch_state = module_data.touch_state
+                        matched_module_id = module_id
+                        matched_esp32_ids.add(module_id)
+                        self.position_cache[module_id] = det.center
+                        break
+
+            # 获取模块类型（从YOLO class_id映射）
+            module_type = self.id_mapping.get(det.class_id, ModuleType.UNKNOWN)
+
+            fused = FusedModuleData(
+                module_id=matched_module_id,
+                module_type=module_type,
+                position=det.center,
+                touch_state=touch_state,
+                confidence=det.confidence,
+                bbox=det.bbox,
+                track_id=det.track_id,
+                timestamp=det.timestamp
+            )
+            self.fused_modules.append(fused)
+
+        # 处理有ESP32数据但无YOLO匹配的（降级模式：仅ESP32）
+        for module_id, module_data in self.current_modules.items():
+            if module_id not in matched_esp32_ids and module_data.online:
+                if module_id in self.position_cache:
+                    position = self.position_cache[module_id]
+                else:
+                    position = (-1, -1)
+
+                fused = FusedModuleData(
+                    module_id=module_id,
+                    module_type=module_data.module_type,
+                    position=position,
+                    touch_state=module_data.touch_state,
+                    confidence=0.3,
+                    bbox=None,
+                    timestamp=module_data.timestamp
+                )
+                self.fused_modules.append(fused)
+
+    def _fuse_esp32_primary(self):
+        """
+        ESP32为主的数据融合（原逻辑）
+        """
         # 执行匹配
         matches = self._match_detections_to_modules()
 
@@ -234,8 +326,6 @@ class DataFusion:
                 )
                 self.fused_modules.append(fused)
 
-        return self.fused_modules
-
     def get_fused_data(self) -> List[FusedModuleData]:
         """获取融合结果"""
         return self.fused_modules
@@ -271,6 +361,7 @@ class DataFusion:
                     "position": {"x": m.position[0], "y": m.position[1]},
                     "touch_state": m.touch_state,
                     "confidence": m.confidence,
+                    "track_id": m.track_id,
                     "bbox": {
                         "x": m.bbox[0] if m.bbox else 0,
                         "y": m.bbox[1] if m.bbox else 0,
