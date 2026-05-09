@@ -439,12 +439,12 @@ def generate_prompt(user_input):
 
 | 模块 | 总项 | ✅ | ⚠️ | ❌ | 完成度 |
 |------|------|----|----|----|--------|
-| 模块一：视觉定位与融合 | 7 | 6 | 1 | 0 | **86%** |
+| 模块一：视觉定位与融合 | 8 | 7 | 1 | 0 | **88%** |
 | 模块二：RAG 检索与生成 | 6 | 6 | 0 | 0 | **100%** |
 | 模块三：多模态内容生成 | 5 | 5 | 0 | 0 | **100%** |
 | 模块四：Unity 渲染交互 | 3 | 0 | 2 | 1 | **17%** |
 | 生图提示词转换 | 1 | 1 | 0 | 0 | **100%** |
-| **总计** | **22** | **18** | **3** | **1** | **~86%** |
+| **总计** | **23** | **19** | **3** | **1** | **~87%** |
 
 > 模块二说明：检索采用精确匹配+双向查找（BM25 模糊检索为 P2 搁置，非必需）。输入输出接口全部实现（`RAGSystem` 类）。连接图分析（`_analyze_connections`）、模板+LLM融合叙事、明信片端到端管道均已可用。模块二已基本完成。
 
@@ -457,8 +457,9 @@ def generate_prompt(user_input):
 | 检索上下文 → 叙事生成 → 图像生成 → 明信片合成 | ✅ 端到端可跑 |
 | Python 端 → Unity 实时渲染 | ❌ 未打通 |
 | ESP32 硬件模块通信 | ⚠️ 备选方案，非主线 |
+| QuickDraw 模型训练 | ✅ 82 类训练完成，val acc 83.8%，ONNX 已导出 |
 
-**核心 AI 管线 ~95%，Unity 交互层 ~17%，整体 ~85%。**
+**核心 AI 管线 ~97%，Unity 交互层 ~17%，整体 ~87%。**
 
 ---
 
@@ -562,6 +563,7 @@ def generate_prompt(user_input):
 | **人物推荐引擎** | `rag/character_recommend.py` | ✅ 已实现 | 四维打分（参考表+同组+关键词+基础）→ Top-3 推荐 |
 | **人物轮盘** | `vision/character_wheel.py` | 新增 | 5组人物横向滚动 + 手势控制 |
 | **手势状态机** | `vision/gesture_state_machine.py` | 扩展 `gesture_connection.py` | 多模式状态管理（绘画/候选选择/人物推荐/人物轮盘） |
+| **QuickDraw 模型训练** | `vision/quickdraw/` | ✅ 已就绪 | 下载93类.npy数据 → 训练CNN → 导出ONNX |
 
 ---
 
@@ -579,9 +581,9 @@ def generate_prompt(user_input):
        ↓
 轨迹栅格化：28×28 单通道灰度图，笔画宽度 2px，抗锯齿
        ↓
-CNN 推理：QuickDraw 预训练 MobileNet（345 类）
-  • 模型加载：.h5 / .onnx
-  • 输出：345 维置信度向量
+CNN 推理：自训练 QuickDraw CNN（93 类）
+  • 模型加载：ONNX（vision/models/quickdraw_mobilenet.onnx）
+  • 降级方案：HeuristicPredictor（几何特征分类，模型不可用时自动切换）
        ↓
 QuickDraw → 88 物象映射表（一级映射）
   • 例：{"river": ["湘江", "流水", "湖面"], "tree": ["古树", "竹林", "林荫道"], ...}
@@ -594,19 +596,81 @@ QuickDraw → 88 物象映射表（一级映射）
 Top-3 候选物象 [(name, score), ...]
 ```
 
+**QuickDraw 模型训练模块**（`vision/quickdraw/`）：
+
+| 文件 | 说明 |
+|------|------|
+| `config.py` | 82 个 QuickDraw 类别列表（经官方 categories.txt 校准）、超参数、路径配置 |
+| `download_data.py` | 并发下载（默认 8 线程），从 GCS 下载 `.npy` 位图文件，支持 `--retry` 重试失败 |
+| `model.py` | 2层 CNN：Conv→BN→ReLU→MaxPool ×2 → FC→Dropout ×2 → logits |
+| `dataset.py` | PyTorch Dataset，自动划分 train/val（85/15），每类取前 15K 样本 |
+| `train.py` | 训练入口：AdamW + CosineAnnealing → 导出 ONNX，支持 `--resume` 断点续训 |
+
+**断点续训**：
+```bash
+python -m vision.quickdraw.train --resume    # 从上次中断点继续
+python -m vision.quickdraw.train --export-only  # 仅从 checkpoint 导出 ONNX
+```
+每个 epoch 保存最佳模型到 `checkpoint.pth`，包含 optimizer state、epoch、best_acc。
+
+训练流程：
+```bash
+python -m vision.quickdraw.download_data   # 1. 下载数据（82类，~8.5GB, 10-20min）
+python -m vision.quickdraw.train           # 2. 训练 + 导出 ONNX（GPU 1-2h / CPU 4-6h）
+```
+输出文件：
+- `vision/models/quickdraw_mobilenet.onnx` — 供 `sketch_recognizer.py` 加载
+- `vision/models/quickdraw_classes.json` — 类别索引映射
+- `vision/quickdraw/checkpoint.pth` — 断点文件，用于恢复训练
+
+**模型规格**：
+
+| 属性 | 值 |
+|------|-----|
+| 架构 | 2层CNN（Conv 5×5, 32→64 通道） + 2层FC（512→128） + 输出层 |
+| 输入 | `(B, 1, 28, 28)` float32 灰度图 |
+| 输出 | `(B, 82)` logits |
+| 参数量 | ~635K |
+| 训练数据 | Google QuickDraw .npy 位图，82 类 × 15K 样本/类 ≈ 1.2M |
+| 数据增强 | 无（.npy 数据已含天然笔触变异，足够覆盖手势绘画差异） |
+
+**类别校准**：原始 93 类中有 16 个不在 QuickDraw 官方 345 类别中，已移除并将对应物象重新分配到最近的有效类别。最终 82 类全覆盖 88 物象。
+
 **需要开发的子任务**：
 
-| 任务 | 说明 | 优先级 |
-|------|------|--------|
-| 轨迹归一化 + 栅格化 | 点序列 → 28×28 灰度图，含抗锯齿笔画渲染 | P0 |
-| QuickDraw 模型加载 | 下载 MobileNet 预训练权重（`.h5`），本地 ONNX 推理 | P0 |
-| 类别映射表 | QuickDraw 345 类英文名 → 88 物象中文名映射 JSON | P0 |
-| 颜色加权算法 | 根据第一幕颜色对映射后候选排序 | P1 |
-| 模型备选 | 如 MobileNet 精度不足，评估 Sketch-RNN | P2 |
+| 任务 | 说明 | 优先级 | 状态 |
+|------|------|--------|------|
+| 轨迹归一化 + 栅格化 | 点序列 → 28×28 灰度图，含抗锯齿笔画渲染 | P0 | ✅ |
+| QuickDraw 数据下载 | 82 类 .npy 位图，~8.5GB | P0 | ✅ |
+| QuickDraw 模型训练 | 自训练 CNN → ONNX 本地推理，含断点续训 | P0 | ✅ |
+| 类别映射表 | QuickDraw 82 类英文名 → 88 物象中文名映射 | P0 | ✅ |
+| 颜色加权算法 | 根据第一幕颜色对映射后候选排序 | P1 | ✅ |
+| 几何特征降级 | HeuristicPredictor：9 种几何分支，模型不可用时自动降级 | P0 | ✅ |
 
-**QuickDraw 预训练模型来源**：
+**训练结果**（2026-05-09）：
+
+| 指标 | 值 |
+|------|-----|
+| 最终验证准确率 | **83.8%** |
+| 训练时间 | ~10 分钟（RTX 4060 Laptop GPU, 15 epochs） |
+| ONNX 模型大小 | 2.5MB |
+| 训练集 | 1,045,500 样本（82 类 × ~12.7K） |
+| 验证集 | 184,500 样本 |
+| 参数量 | 653,234 |
+
+收敛过程：
+```
+Epoch  1: val acc 77.8%
+Epoch  5: val acc 82.1%
+Epoch 10: val acc 83.5%
+Epoch 15: val acc 83.8%  ← 最佳
+```
+
+**QuickDraw 数据来源**：
 - [Google Quick, Draw! Dataset](https://github.com/googlecreativelab/quickdraw-dataset)（5000 万张草图，345 类）
-- 推荐使用社区预训练的 MobileNet 权重（`quickdraw_mobilenet.h5`），转为 ONNX 本地推理
+- 28×28 灰度位图 `.npy` 格式，HTTP 直接下载
+- 本项目选取其中 82 个与 88 物象有映射关系的类别（经官方 categories.txt 校验）
+- 不支持类别（16个）：waterfall, tower, window, road, bookshelf, pen, paper, newspaper, blackboard, plate, boat, flag, trophy, medal, magnifying glass, baseball cap
 
 ---
 
@@ -767,25 +831,193 @@ Top-3 推荐人物 + 推荐理由
 
 ---
 
-### 11.7 开发优先级
+### 11.7 Unity Bridge 打通方案
+
+**Unity 项目路径**：`D:\unity projects\ohhh-display`
+
+#### 11.7.1 当前通信架构
+
+```
+Python 端                              Unity 端
+─────────                              ────────
+unity_bridge/server.py  :8888  ←→  TCP Client (C#)
+  ├── module_placed  → Unity          接收描述、颜色、连线样式
+  ├── connection_created → Unity
+  └── generation_result → Unity
+
+unity_bridge/hand_server.py :8889  →  TCP Client (C#)
+  └── hand_tracking (每帧)
+
+unity_bridge/sender.py  空文件 ← 待实现
+```
+
+已实现的消息类型见 §11.6 上方表格。
+
+#### 11.7.2 实现顺序
+
+| 阶段 | 内容 | 说明 |
+|------|------|------|
+| **一** | `sender.py` 统一发送器 | 封装 TCP 发送逻辑，支持重连、多端口。所有 Python→Unity 推送统一入口 |
+| **二** | Act 2 物象候选 | 新增 `object_candidates` (Py→Unity) + `object_selected` (Unity→Py) |
+| **三** | Act 3 人物推荐 | 新增 `character_candidates` + `character_selected` 消息 |
+| **四** | Act 3 人物轮盘 | 新增 `wheel_state` + `wheel_selected` 消息 |
+| **五** | 手势状态机接驳 | `gesture_connection.py` 多模式状态机回调 → `UnitySender` |
+
+#### 11.7.3 新增消息类型规格
+
+**Phase 1 — sender.py 接口**
+
+```python
+class UnitySender:
+    """Python → Unity 统一消息发送器"""
+    def __init__(self, host="127.0.0.1", port=8888, hand_port=8889):
+        ...
+    def send(self, data: dict) -> bool:
+        """发送 JSON 消息，自动追加 \n，返回是否成功"""
+    def send_object_candidates(self, color, candidates): ...
+    def send_character_candidates(self, candidates): ...
+    def send_wheel_state(self, groups, current_group, characters, highlighted): ...
+    def send_hand_data(self, landmarks, palm_center): ...  # 迁移已有逻辑
+    def close(self): ...
+```
+
+**Phase 2 — Act 2 物象候选**
+
+```
+Python → Unity: object_candidates
+{
+  "type": "object_candidates",
+  "color": "岳麓绿",
+  "candidates": [
+    {"name": "古树", "score": 0.89, "qd_category": "tree"},
+    {"name": "竹林", "score": 0.72, "qd_category": "tree"},
+    {"name": "林荫道", "score": 0.65, "qd_category": "tree"}
+  ]
+}
+
+Unity → Python: object_selected
+{
+  "type": "object_selected",
+  "name": "古树"
+}
+```
+
+**Phase 3 — Act 3 人物推荐**
+
+```
+Python → Unity: character_candidates
+{
+  "type": "character_candidates",
+  "candidates": [
+    {"name": "王夫之", "title": "思想家", "score": 0.85, "reason": "经典搭配推荐"},
+    {"name": "胡安国", "title": "经学家", "score": 0.72, "reason": "关键词匹配"},
+    {"name": "胡宏", "title": "思想家", "score": 0.68, "reason": "与已选人物同脉"}
+  ]
+}
+
+Unity → Python: character_selected
+{
+  "type": "character_selected",
+  "name": "王夫之"
+}
+```
+
+**Phase 4 — Act 3 人物轮盘**
+
+```
+Python → Unity: wheel_state
+{
+  "type": "wheel_state",
+  "groups": ["理学脉络", "湘军将帅", "维新革命", "现代学人", "校园角色"],
+  "current_group": "理学脉络",
+  "characters": [
+    {"name": "周敦颐", "title": "理学开创者"},
+    {"name": "程颢", "title": "理学宗师"},
+    ...
+  ],
+  "highlighted_index": 0
+}
+
+Unity → Python: wheel_group_changed
+{
+  "type": "wheel_group_changed",
+  "group": "湘军将帅"
+}
+
+Unity → Python: wheel_character_selected
+{
+  "type": "wheel_character_selected",
+  "name": "曾国藩"
+}
+```
+
+**Phase 5 — 手势状态机→Unity**
+
+```
+Python → Unity: gesture_state
+{
+  "type": "gesture_state",
+  "mode": "DRAWING",           # GLOBAL | DRAWING | CANDIDATE | CHAR_RECOMMEND | CHAR_WHEEL
+  "sub_state": "TRACKING",     # 各 mode 内的子状态
+  "gesture": "index_pointing"  # 当前识别到的手势
+}
+```
+
+#### 11.7.4 Unity C# 端接入要点
+
+**TCP 连接**：
+- 主通道：`127.0.0.1:8888` — 接收所有业务消息（candidates, wheel_state 等），发送用户选择
+- 手部通道：`127.0.0.1:8889` — 实时手部 landmark 数据（每帧）
+
+**消息解析**：
+- 格式：`JSON + \n` 分隔
+- 每条消息含 `type` 字段用于路由分发
+- 使用 `JsonUtility.FromJson<T>()` 反序列化（需扁平化数组，见 hand_server.py 的 `_flatten` 处理）
+
+**消息路由**：
+```csharp
+void OnMessage(string json) {
+    var msg = JsonUtility.FromJson<BaseMessage>(json);
+    switch (msg.type) {
+        case "object_candidates":     HandleObjectCandidates(json); break;
+        case "character_candidates":  HandleCharacterCandidates(json); break;
+        case "wheel_state":           HandleWheelState(json); break;
+        case "hand_tracking":         HandleHandTracking(json); break;
+        case "gesture_state":         HandleGestureState(json); break;
+    }
+}
+```
+
+**UI 组件需求**：
+| 消息 | Unity UI 表现 |
+|------|-------------|
+| `object_candidates` | 3 张横向候选卡片，显示名称 + 置信度条 + 颜色标识 |
+| `character_candidates` | 3 张人物卡片，显示名称 + 称号 + 推荐理由 |
+| `wheel_state` | 当前组横向滚动卡片列表，高亮卡片放大 |
+| `gesture_state` | 状态指示器（绘画中/识别中/选择中） |
+
+---
+
+### 11.8 开发优先级
 
 ```
 P0（核心通路必须跑通）：
-  1. 手势状态机多模式框架
-  2. 食指伸出检测 + 轨迹录制
-  3. 轨迹栅格化 + QuickDraw CNN 推理
-  4. QuickDraw → 88 物象映射表
-  5. 人物推荐 RAG 检索接口
-  6. 人物分组数据
+  1. sender.py 统一发送器
+  2. object_candidates / object_selected 消息（Act 2 通路）
+  3. character_candidates / character_selected 消息（Act 3 推荐通路）
+  4. wheel_state / wheel_character_selected 消息（Act 3 轮盘通路）
+  5. 手势状态机多模式框架
+  6. 食指伸出检测 + 轨迹录制
+  7. QuickDraw ONNX 模型推理（✅ 已完成）
+  8. 人物推荐引擎接口（✅ 已完成）
 
 P1（完整体验）：
-  7. 颜色上下文加权排序
-  8. 人物 LLM 排序 prompt
-  9. 轮盘滚动逻辑 + 手势映射
-  10. Unity Bridge 新消息类型
+  9. gesture_state 消息（状态机状态同步到 Unity）
+  10. 颜色上下文加权排序（✅ 已完成）
+  11. 轮盘分组切换（Unity→Python→更新 wheel_state）
+  12. Unity C# 候选卡片 UI + 轮盘 UI
 
 P2（优化打磨）：
-  11. Sketch-RNN 备选评估
-  12. 推荐示例 few-shot prompt
-  13. 轮盘悬停计时预览
+  13. sender.py 断线重连逻辑
+  14. 轮盘悬停计时预览
 ```

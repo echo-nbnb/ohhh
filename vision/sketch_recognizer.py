@@ -7,6 +7,8 @@
   推荐使用社区转换的 ONNX 权重，放在 vision/models/quickdraw_mobilenet.onnx
 """
 
+import os
+import json
 import numpy as np
 import math
 from typing import List, Tuple, Optional, Dict
@@ -28,22 +30,19 @@ QUICKDRAW_TO_OBJECT: Dict[str, List[str]] = {
     "sun":          ["阳光", "灯光", "草地"],
     "ocean":        ["湘江", "流水", "湖面"],
     "pond":         ["湖面", "草地"],
-    "waterfall":    ["流水", "湘江"],
 
     # 建筑/结构
-    "house":        ["岳麓书院", "书院", "教学楼", "宿舍", "图书馆", "会议室", "书店", "打印店", "公司", "实习单位"],
+    "house":        ["岳麓书院", "书院", "教学楼", "宿舍", "图书馆", "会议室",
+                     "书店", "打印店", "公司", "实习单位", "窗格", "教室"],
     "castle":       ["红墙", "展览馆", "纪念碑", "爱晚亭"],
     "church":       ["钟楼", "讲堂", "爱晚亭"],
-    "tower":        ["钟楼", "灯塔", "纪念碑"],
     "door":         ["校门", "山门", "入口"],
-    "window":       ["窗格", "教室"],
     "fence":        ["栏杆", "长廊"],
     "bridge":       ["桥梁", "石桥"],
     "stairs":       ["石阶", "楼梯", "看台"],
-    "road":         ["道路", "跑道", "长廊", "林荫道", "城市街道"],
     "streetlight":  ["灯光", "路灯"],
     "lighthouse":   ["灯塔", "纪念碑", "钟楼"],
-    "square":       [],  # 见下方符号段统一定义
+    "square":       ["广场", "黑板", "电子屏", "书架", "校训墙", "会议室", "影子"],
 
     # 植物
     "tree":         ["古树", "竹林", "林荫道"],
@@ -52,54 +51,50 @@ QUICKDRAW_TO_OBJECT: Dict[str, List[str]] = {
     "bush":         ["草地", "竹林"],
     "grass":        ["草地", "操场"],
     "cactus":       ["古树", "实验台"],
-    "palm_tree":    ["古树", "林荫道"],
+    "palm tree":    ["古树", "林荫道"],
 
     # 室内/学习
-    "book":         ["书卷", "书架", "笔记本", "论文", "期刊"],
-    "bookshelf":    ["书架", "图书馆"],
+    "book":         ["书卷", "书架", "笔记本", "论文", "期刊", "试卷", "报刊栏", "公告栏"],
     "pencil":       ["粉笔", "钢笔", "笔记本"],
-    "pen":          ["粉笔", "钢笔"],
-    "paper":        ["试卷", "论文", "笔记本"],
-    "newspaper":    ["报刊栏", "公告栏", "期刊"],
-    "blackboard":   ["黑板", "电子屏"],
     "clock":        ["钟楼"],
     "calendar":     ["时间轴", "公告栏"],
-    "envelope":     ["信件", "毕业证", "证书"],
+    "envelope":     ["信件", "毕业证", "证书", "报刊栏", "期刊"],
 
     # 物品
     "computer":     ["电脑", "数据屏", "服务器", "代码", "算法", "模型", "实验室"],
     "cell phone":   ["手机", "电子屏"],
     "headphones":   ["耳机"],
-    "television":   ["电子屏", "投影仪"],
+    "television":   ["电子屏", "投影仪", "黑板"],
     "microphone":   ["讲座", "论坛", "讲坛", "讲席"],
     "camera":       ["镜头", "记录"],
     "binoculars":   ["显微镜", "观察", "望远镜"],
     "key":          ["棋", "入口"],
     "hammer":       ["实验工具"],
     "screwdriver":  ["实验工具"],
+    "compass":      ["指南针", "探索"],
+    "map":          ["地图", "导航"],
 
     # 器具
     "backpack":     ["背包", "行李箱"],
     "suitcase":     ["行李箱", "背包"],
-    "cup":          ["水杯", "咖啡厅"],
-    "coffee_cup":   ["咖啡厅", "水杯"],
-    "wine_bottle":  ["水杯"],
+    "cup":          ["水杯", "咖啡厅", "奖杯"],
+    "coffee cup":   ["咖啡厅", "水杯"],
+    "wine bottle":  ["水杯"],
     "knife":        ["实验工具"],
     "fork":         ["食堂"],
     "spoon":        ["食堂"],
-    "plate":        ["食堂"],
     "basket":       ["书架", "背包"],
 
     # 交通
     "bicycle":      ["共享单车", "校道"],
     "car":          ["公交站", "校道", "道路"],
-    "bus":          ["公交站", "道路"],
+    "bus":          ["公交站", "道路", "城市街道"],
     "train":        ["火车站", "地铁站", "道路"],
     "airplane":     ["机场"],
-    "boat":         ["湘江", "湖面"],
     "sailboat":     ["湘江", "湖面"],
+    "ambulance":    ["公交站", "校道"],
 
-    # 人物/身体（映射到抽象或校园角色）
+    # 身体
     "face":         ["镜子", "观察"],
     "eye":          ["观察", "镜子"],
     "hand":         ["手势", "连接"],
@@ -108,19 +103,12 @@ QUICKDRAW_TO_OBJECT: Dict[str, List[str]] = {
     # 运动
     "baseball":     ["操场", "运动场"],
     "basketball":   ["篮球场"],
-    "tennis_racquet": ["运动场", "操场"],
-    "soccer_ball":  ["操场", "运动场"],
+    "tennis racquet": ["运动场", "操场"],
+    "soccer ball":  ["操场", "运动场"],
 
     # 符号/标志
-    "flag":         ["旗杆", "旗帜"],
-    "trophy":       ["奖杯", "荣誉墙", "竞赛"],
-    "medal":        ["荣誉墙", "证书"],
-    "light_bulb":   ["灯光", "创意"],
-    "magnifying_glass": ["显微镜", "探索"],
-    "compass":      ["指南针", "探索"],
-    "map":          ["地图", "导航"],
+    "light bulb":   ["灯光", "创意"],
     "hat":          ["学位帽"],
-    "baseball_cap": ["学位帽"],
 
     # 乐器
     "guitar":       ["乐器", "舞台"],
@@ -128,15 +116,14 @@ QUICKDRAW_TO_OBJECT: Dict[str, List[str]] = {
     "violin":       ["乐器", "舞台"],
     "trumpet":      ["号角", "钟楼"],
 
-    # 其他
+    # 几何/其他
     "umbrella":     ["雨滴", "屋檐"],
     "wheel":        ["齿轮", "共享单车"],
     "zigzag":       ["闪电", "石阶", "电"],
-    "triangle":     ["山门", "屋顶", "旗帜"],
+    "triangle":     ["山门", "屋顶", "旗帜", "旗杆"],
     "circle":       ["湖面", "钟楼", "镜子", "奖杯"],
-    "square":       ["广场", "黑板", "电子屏", "书架", "校训墙", "会议室", "影子"],
-    "line":         ["道路", "跑道", "湘江", "长廊"],
-    "diamond":      ["碑刻", "证书"],
+    "line":         ["道路", "跑道", "湘江", "长廊", "旗杆"],
+    "diamond":      ["碑刻", "证书", "荣誉墙"],
     "hexagon":      ["实验台", "蜂巢"],
     "octagon":      ["亭子", "钟楼"],
 }
@@ -562,11 +549,17 @@ class SketchRecognizer:
             return False
 
     def _get_quickdraw_classes(self) -> List[str]:
-        """获取 QuickDraw 345 类名列表"""
-        # 使用映射表中的类别作为最小集
-        classes = sorted(QUICKDRAW_TO_OBJECT.keys())
-        # 补充常见 QuickDraw 类别（共 345 个，这里列关键的部分）
-        return classes
+        """获取 QuickDraw 类别名列表，优先从训练导出的映射文件加载"""
+        import json
+        mapping_path = os.path.join(os.path.dirname(__file__), "models", "quickdraw_classes.json")
+        if os.path.exists(mapping_path):
+            with open(mapping_path, "r", encoding="utf-8") as f:
+                idx_to_cat = json.load(f)
+                # idx_to_cat is {"0": "cat", "1": "dog", ...}
+                classes = [idx_to_cat[str(i)] for i in range(len(idx_to_cat))]
+                return classes
+        # 降级：使用映射表中的类别
+        return sorted(QUICKDRAW_TO_OBJECT.keys())
 
     # ------------------------------------------------------------------
     # 主要接口

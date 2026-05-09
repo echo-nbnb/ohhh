@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.pyo
+output/
+vision/quickdraw/data/
+vision/quickdraw/checkpoint.pth
+vision/pidinet/*.pth

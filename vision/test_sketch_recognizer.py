@@ -82,6 +82,12 @@ def main():
     # 初始化
     tracker = HandTracker()
     recognizer = create_sketch_recognizer()
+    model_path = os.path.join(os.path.dirname(__file__), "models", "quickdraw_mobilenet.onnx")
+    if os.path.exists(model_path):
+        ok = recognizer.load_model(model_path)
+        print(f"ONNX 模型: {'已加载' if ok else '加载失败，使用启发式降级'}")
+    else:
+        print(f"ONNX 模型不存在 ({model_path})，使用启发式降级")
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
