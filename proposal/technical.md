@@ -420,6 +420,7 @@ def generate_prompt(user_input):
 | | 知识库内容 | ✅ 已构建（208实体+107组合+100模板） |
 | | 输入输出定义 | ✅ 已实现（RAGSystem 全部接口） |
 | | 连接图分析+模板融合 | ✅ 已实现（`_analyze_connections` + `_pick_templates`） |
+| | 人物推荐引擎 | ✅ 已实现（54核心人物，四维打分） |
 | **模块三** | 文本生成(实时) | ✅ 已实现 |
 | | 叙事卡生成 | ✅ 已实现 |
 | | 视觉生成 | ✅ 已实现（wanx-v1 万象） |
@@ -439,11 +440,11 @@ def generate_prompt(user_input):
 | 模块 | 总项 | ✅ | ⚠️ | ❌ | 完成度 |
 |------|------|----|----|----|--------|
 | 模块一：视觉定位与融合 | 7 | 6 | 1 | 0 | **86%** |
-| 模块二：RAG 检索与生成 | 5 | 5 | 0 | 0 | **100%** |
+| 模块二：RAG 检索与生成 | 6 | 6 | 0 | 0 | **100%** |
 | 模块三：多模态内容生成 | 5 | 5 | 0 | 0 | **100%** |
 | 模块四：Unity 渲染交互 | 3 | 0 | 2 | 1 | **17%** |
 | 生图提示词转换 | 1 | 1 | 0 | 0 | **100%** |
-| **总计** | **21** | **17** | **3** | **1** | **~85%** |
+| **总计** | **22** | **18** | **3** | **1** | **~86%** |
 
 > 模块二说明：检索采用精确匹配+双向查找（BM25 模糊检索为 P2 搁置，非必需）。输入输出接口全部实现（`RAGSystem` 类）。连接图分析（`_analyze_connections`）、模板+LLM融合叙事、明信片端到端管道均已可用。模块二已基本完成。
 
@@ -558,7 +559,7 @@ def generate_prompt(user_input):
 | 模块 | 文件（建议） | 类型 | 说明 |
 |------|-------------|------|------|
 | **草图识别** | `vision/sketch_recognizer.py` | 新增 | 指尖轨迹栅格化 → CNN 分类 → 物象映射 |
-| **人物推荐引擎** | `rag/character_recommend.py` | 新增 | 颜色+物象 → RAG 检索人物 → Top-3 推荐 |
+| **人物推荐引擎** | `rag/character_recommend.py` | ✅ 已实现 | 四维打分（参考表+同组+关键词+基础）→ Top-3 推荐 |
 | **人物轮盘** | `vision/character_wheel.py` | 新增 | 5组人物横向滚动 + 手势控制 |
 | **手势状态机** | `vision/gesture_state_machine.py` | 扩展 `gesture_connection.py` | 多模式状态管理（绘画/候选选择/人物推荐/人物轮盘） |
 
@@ -609,36 +610,57 @@ Top-3 候选物象 [(name, score), ...]
 
 ---
 
-### 11.3 模块二：人物推荐引擎（`rag/character_recommend.py`）
+### 11.3 模块二：人物推荐引擎（`rag/character_recommend.py`）✅ 已实现
 
 **输入**：第一幕颜色 + 第二幕所有已选物象 + 已选人物列表
-**输出**：Top-3 推荐人物 `[(character_name, reason, score), ...]`
+**输出**：Top-3 推荐人物 `[RecommendResult(name, title, score, reason), ...]`
 
 **管线**：
 
 ```
-颜色语义 + 物象语义 + 已选人物上下文
+颜色 + 物象 + 已选人物
        ↓
-RAG 检索人物知识库（160条目）
-  • 颜色关联检索：颜色 symbolism → 匹配人物 spirit
-  • 物象关联检索：物象 related_entities → 匹配人物
-  • 已选人物关联：related_entities 同代/同派加权
+四维打分（纯本地，无依赖）
+  (1) 内置参考表命中  (0~0.50) : 已知颜色+物象→人物映射（与 interaction.md 推荐示例表一致）
+  (2) 已选人物同组加权 (0~0.20) : 同理学脉/湘军/维新/现代学人 group 加权
+  (3) 关键词文本匹配  (0~0.25) : 颜色关键词 + 物象名在人物 title/spirit/description 中的命中
+  (4) 实体基础分      (0~0.05) : description 长度、title 存在性
        ↓
-LLM 排序（qwen-turbo）
-  • prompt：给定颜色 X、物象 Y、已选人物 Z，从候选N人中推荐最相关的3位
+降序排序 → Top-15 候选
+       ↓
+[可选] LLM 精选（qwen-turbo）
+  • prompt：给定颜色 X、物象 Y、已选人物 Z，从15候选精选3位
+  • 降级：LLM 不可用时直接返回启发式 Top-3
        ↓
 Top-3 推荐人物 + 推荐理由
 ```
 
-**需要开发的子任务**：
+**数据来源**：
+- 54 个核心人物嵌入在 `CORE_CHARACTERS` 列表中（6 组：理学脉络12/湘军将帅4/维新革命6/现代学人12/校园角色13/抽象意象9）
+- 原因：`build_knowledge.py` 的 TXT 解析器存在格式缺陷，历史人物名大量丢失，改为手动维护精确列表
+- 颜色→物象→人物参考表与 `interaction.md` §第三幕推荐示例完全一致
 
-| 任务 | 说明 | 优先级 |
-|------|------|--------|
-| 颜色→人物语义检索 | 颜色 symbolism 字段 → 人物 spirit 字段匹配 | P0 |
-| 物象→人物关联检索 | 物象 related_entities → 人物 related_entities 交集 | P0 |
-| LLM 排序 prompt | 构建推荐 prompt，输出 Top-3 + 一句话理由 | P0 |
-| 已选人物上下文 | 后续推荐时加权已选人物的同代/同派 | P1 |
-| 推荐示例表维护 | 见 interaction.md §第三幕推荐示例，作为 prompt few-shot | P2 |
+**核心类/接口**：
+
+| 类/函数 | 说明 |
+|---------|------|
+| `CharacterRecommender` | 推荐引擎主类 |
+| `recommend(color, objects, selected, use_llm)` | 主接口，返回 `List[RecommendResult]` |
+| `_score_one(name, data, color, objects, selected)` | 单人物四维打分 |
+| `_llm_rerank(candidates, ...)` | LLM 二次精选（可选，需 dashscope API） |
+| `create_character_recommender(knowledge_path, api_key)` | 工厂函数 |
+| `CHARACTER_GROUPS` | 6 组人物分组字典 |
+| `COLOR_TO_SPIRIT_KEYWORDS` | 6 色 → 精神关键词表 |
+
+**实现状态**：
+
+| 子任务 | 状态 | 说明 |
+|--------|------|------|
+| 内置参考表 | ✅ 已实现 | 6色 × 多种物象 → 推荐人物，与交互文档一致 |
+| 已选人物同组加权 | ✅ 已实现 | CHARACTER_GROUPS 6组覆盖全部核心人物 |
+| 关键词文本匹配 | ✅ 已实现 | 颜色关键词 + 物象名双通道命中 |
+| LLM 排序 prompt | ✅ 已实现 | 可选启用，失败自动降级到启发式 |
+| 已选人物排除 | ✅ 已实现 | 推荐结果自动过滤已选人物 |
 
 ---
 

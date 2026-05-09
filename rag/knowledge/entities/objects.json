@@ -1,14 +1,797 @@
 {
-  "_template": "物象实体模板",
-  "_description": "每个物象实体的JSON结构",
-  "_example": {
-    "书院": {
-      "type": "object",
-      "description": "千年学府，读书讲学之地",
-      "symbolism": "求知、传承、讲学",
-      "related_entities": ["岳麓绿", "张栻"],
-      "historical_context": "岳麓书院，创建于976年，朱熹、张栻曾在此讲学"
-    }
+  "岳麓书院": {
+    "type": "object",
+    "description": "创建于976年",
+    "symbolism": "千年学府",
+    "related_entities": [
+      "学子",
+      "朱熹"
+    ],
+    "historical_context": "岳麓书院，千年学府，创建于976年"
   },
-  "_TODO": "请填充物象实体"
+  "湘江": {
+    "type": "object",
+    "description": "贯穿长沙",
+    "symbolism": "时间流动",
+    "related_entities": [
+      "革命",
+      "城市"
+    ],
+    "historical_context": "湘江，时间流动，贯穿长沙"
+  },
+  "爱晚亭": {
+    "type": "object",
+    "description": "岳麓山景点",
+    "symbolism": "文人精神",
+    "related_entities": [
+      "诗意"
+    ],
+    "historical_context": "爱晚亭，文人精神，岳麓山景点"
+  },
+  "讲堂": {
+    "type": "object",
+    "description": "理学传播",
+    "symbolism": "思想交流",
+    "related_entities": [
+      "导师"
+    ],
+    "historical_context": "讲堂，思想交流，理学传播"
+  },
+  "书卷": {
+    "type": "object",
+    "description": "文化传播",
+    "symbolism": "知识载体",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "书卷，知识载体，文化传播"
+  },
+  "古树": {
+    "type": "object",
+    "description": "千年树木",
+    "symbolism": "生命延续",
+    "related_entities": [
+      "书院"
+    ],
+    "historical_context": "古树，生命延续，千年树木"
+  },
+  "碑刻": {
+    "type": "object",
+    "description": "重要事件",
+    "symbolism": "历史记录",
+    "related_entities": [
+      "校史"
+    ],
+    "historical_context": "碑刻，历史记录，重要事件"
+  },
+  "校门": {
+    "type": "object",
+    "description": "新生入学",
+    "symbolism": "阶段开始",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "校门，阶段开始，新生入学"
+  },
+  "图书馆": {
+    "type": "object",
+    "description": "学术研究",
+    "symbolism": "知识中心",
+    "related_entities": [
+      "学者"
+    ],
+    "historical_context": "图书馆，知识中心，学术研究"
+  },
+  "操场": {
+    "type": "object",
+    "description": "校园生活",
+    "symbolism": "青春空间",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "操场，青春空间，校园生活"
+  },
+  "实验室": {
+    "type": "object",
+    "description": "研究活动",
+    "symbolism": "科技空间",
+    "related_entities": [
+      "研究者"
+    ],
+    "historical_context": "实验室，科技空间，研究活动"
+  },
+  "桥梁": {
+    "type": "object",
+    "description": "古今联系",
+    "symbolism": "连接象征",
+    "related_entities": [
+      "湘江"
+    ],
+    "historical_context": "桥梁，连接象征，古今联系"
+  },
+  "石阶": {
+    "type": "object",
+    "description": "求学隐喻",
+    "symbolism": "成长路径",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "石阶，成长路径，求学隐喻"
+  },
+  "红墙": {
+    "type": "object",
+    "description": "书院标志",
+    "symbolism": "传统建筑",
+    "related_entities": [
+      "历史"
+    ],
+    "historical_context": "红墙，传统建筑，书院标志"
+  },
+  "讲席": {
+    "type": "object",
+    "description": "教学场所",
+    "symbolism": "授课中心",
+    "related_entities": [
+      "教师"
+    ],
+    "historical_context": "讲席，授课中心，教学场所"
+  },
+  "钟楼": {
+    "type": "object",
+    "description": "校园节奏",
+    "symbolism": "时间提醒",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "钟楼，时间提醒，校园节奏"
+  },
+  "林荫道": {
+    "type": "object",
+    "description": "校园空间",
+    "symbolism": "学习环境",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "林荫道，学习环境，校园空间"
+  },
+  "教学楼": {
+    "type": "object",
+    "description": "课堂学习",
+    "symbolism": "教育空间",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "教学楼，教育空间，课堂学习"
+  },
+  "宿舍": {
+    "type": "object",
+    "description": "学生成长",
+    "symbolism": "生活空间",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "宿舍，生活空间，学生成长"
+  },
+  "食堂": {
+    "type": "object",
+    "description": "校园日常",
+    "symbolism": "集体生活",
+    "related_entities": [
+      "人群"
+    ],
+    "historical_context": "食堂，集体生活，校园日常"
+  },
+  "会议室": {
+    "type": "object",
+    "description": "集体讨论",
+    "symbolism": "决策空间",
+    "related_entities": [
+      "群体"
+    ],
+    "historical_context": "会议室，决策空间，集体讨论"
+  },
+  "展览馆": {
+    "type": "object",
+    "description": "校史展览",
+    "symbolism": "展示空间",
+    "related_entities": [
+      "访客"
+    ],
+    "historical_context": "展览馆，展示空间，校史展览"
+  },
+  "纪念碑": {
+    "type": "object",
+    "description": "纪念事件",
+    "symbolism": "历史节点",
+    "related_entities": [
+      "集体"
+    ],
+    "historical_context": "纪念碑，历史节点，纪念事件"
+  },
+  "草地": {
+    "type": "object",
+    "description": "校园日常",
+    "symbolism": "休憩空间",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "草地，休憩空间，校园日常"
+  },
+  "广场": {
+    "type": "object",
+    "description": "活动发生",
+    "symbolism": "集体空间",
+    "related_entities": [
+      "人群"
+    ],
+    "historical_context": "广场，集体空间，活动发生"
+  },
+  "山门": {
+    "type": "object",
+    "description": "书院象征入口",
+    "symbolism": "文化入口",
+    "related_entities": [
+      "游客",
+      "学子"
+    ],
+    "historical_context": "山门，文化入口，书院象征入口"
+  },
+  "湖面": {
+    "type": "object",
+    "description": "倒影象征内心",
+    "symbolism": "思考映射",
+    "related_entities": [
+      "学者"
+    ],
+    "historical_context": "湖面，思考映射，倒影象征内心"
+  },
+  "竹林": {
+    "type": "object",
+    "description": "清雅象征",
+    "symbolism": "文人气质",
+    "related_entities": [
+      "学者"
+    ],
+    "historical_context": "竹林，文人气质，清雅象征"
+  },
+  "石桥": {
+    "type": "object",
+    "description": "跨越时间",
+    "symbolism": "历史连接",
+    "related_entities": [
+      "湘江"
+    ],
+    "historical_context": "石桥，历史连接，跨越时间"
+  },
+  "长廊": {
+    "type": "object",
+    "description": "行走与思考",
+    "symbolism": "过渡空间",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "长廊，过渡空间，行走与思考"
+  },
+  "屋檐": {
+    "type": "object",
+    "description": "传统符号",
+    "symbolism": "建筑细节",
+    "related_entities": [
+      "书院"
+    ],
+    "historical_context": "屋檐，建筑细节，传统符号"
+  },
+  "窗格": {
+    "type": "object",
+    "description": "内外连接",
+    "symbolism": "观察视角",
+    "related_entities": [
+      "观察者"
+    ],
+    "historical_context": "窗格，观察视角，内外连接"
+  },
+  "雨滴": {
+    "type": "object",
+    "description": "缓慢变化",
+    "symbolism": "时间细节",
+    "related_entities": [
+      "天空"
+    ],
+    "historical_context": "雨滴，时间细节，缓慢变化"
+  },
+  "风声": {
+    "type": "object",
+    "description": "思想传播",
+    "symbolism": "无形影响",
+    "related_entities": [
+      "群体"
+    ],
+    "historical_context": "风声，无形影响，思想传播"
+  },
+  "灯光": {
+    "type": "object",
+    "description": "夜读环境",
+    "symbolism": "学习象征",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "灯光，学习象征，夜读环境"
+  },
+  "黑板": {
+    "type": "object",
+    "description": "知识传递",
+    "symbolism": "教学工具",
+    "related_entities": [
+      "教师"
+    ],
+    "historical_context": "黑板，教学工具，知识传递"
+  },
+  "粉笔": {
+    "type": "object",
+    "description": "课堂符号",
+    "symbolism": "思想表达",
+    "related_entities": [
+      "教师"
+    ],
+    "historical_context": "粉笔，思想表达，课堂符号"
+  },
+  "电脑": {
+    "type": "object",
+    "description": "信息处理",
+    "symbolism": "现代工具",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "电脑，现代工具，信息处理"
+  },
+  "投影仪": {
+    "type": "object",
+    "description": "信息展示",
+    "symbolism": "教学设备",
+    "related_entities": [
+      "教室"
+    ],
+    "historical_context": "投影仪，教学设备，信息展示"
+  },
+  "试卷": {
+    "type": "object",
+    "description": "学习成果",
+    "symbolism": "学业评估",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "试卷，学业评估，学习成果"
+  },
+  "笔记本": {
+    "type": "object",
+    "description": "思考记录",
+    "symbolism": "记录工具",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "笔记本，记录工具，思考记录"
+  },
+  "书架": {
+    "type": "object",
+    "description": "图书排列",
+    "symbolism": "知识存储",
+    "related_entities": [
+      "图书馆"
+    ],
+    "historical_context": "书架，知识存储，图书排列"
+  },
+  "报刊栏": {
+    "type": "object",
+    "description": "新闻展示",
+    "symbolism": "信息传播",
+    "related_entities": [
+      "校园"
+    ],
+    "historical_context": "报刊栏，信息传播，新闻展示"
+  },
+  "实验台": {
+    "type": "object",
+    "description": "实验操作",
+    "symbolism": "科研工具",
+    "related_entities": [
+      "研究者"
+    ],
+    "historical_context": "实验台，科研工具，实验操作"
+  },
+  "显微镜": {
+    "type": "object",
+    "description": "微观观察",
+    "symbolism": "科学探索",
+    "related_entities": [
+      "实验室"
+    ],
+    "historical_context": "显微镜，科学探索，微观观察"
+  },
+  "数据屏": {
+    "type": "object",
+    "description": "数据可视化",
+    "symbolism": "信息展示",
+    "related_entities": [
+      "研究者"
+    ],
+    "historical_context": "数据屏，信息展示，数据可视化"
+  },
+  "运动场": {
+    "type": "object",
+    "description": "体育空间",
+    "symbolism": "身体活动",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "运动场，身体活动，体育空间"
+  },
+  "跑道": {
+    "type": "object",
+    "description": "时间与速度",
+    "symbolism": "运动轨迹",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "跑道，运动轨迹，时间与速度"
+  },
+  "篮球场": {
+    "type": "object",
+    "description": "团队合作",
+    "symbolism": "集体活动",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "篮球场，集体活动，团队合作"
+  },
+  "看台": {
+    "type": "object",
+    "description": "观看活动",
+    "symbolism": "观察位置",
+    "related_entities": [
+      "人群"
+    ],
+    "historical_context": "看台，观察位置，观看活动"
+  },
+  "旗杆": {
+    "type": "object",
+    "description": "升旗仪式",
+    "symbolism": "仪式象征",
+    "related_entities": [
+      "集体"
+    ],
+    "historical_context": "旗杆，仪式象征，升旗仪式"
+  },
+  "校训墙": {
+    "type": "object",
+    "description": "学校理念",
+    "symbolism": "精神象征",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "校训墙，精神象征，学校理念"
+  },
+  "荣誉墙": {
+    "type": "object",
+    "description": "表彰成果",
+    "symbolism": "成就展示",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "荣誉墙，成就展示，表彰成果"
+  },
+  "毕业证": {
+    "type": "object",
+    "description": "学业完成",
+    "symbolism": "成长标志",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "毕业证，成长标志，学业完成"
+  },
+  "学位帽": {
+    "type": "object",
+    "description": "毕业典礼",
+    "symbolism": "仪式象征",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "学位帽，仪式象征，毕业典礼"
+  },
+  "背包": {
+    "type": "object",
+    "description": "日常携带",
+    "symbolism": "学习工具",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "背包，学习工具，日常携带"
+  },
+  "水杯": {
+    "type": "object",
+    "description": "校园日常",
+    "symbolism": "生活细节",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "水杯，生活细节，校园日常"
+  },
+  "共享单车": {
+    "type": "object",
+    "description": "出行方式",
+    "symbolism": "校园交通",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "共享单车，校园交通，出行方式"
+  },
+  "公交站": {
+    "type": "object",
+    "description": "校园与社会",
+    "symbolism": "城市连接",
+    "related_entities": [
+      "人群"
+    ],
+    "historical_context": "公交站，城市连接，校园与社会"
+  },
+  "咖啡厅": {
+    "type": "object",
+    "description": "思想讨论",
+    "symbolism": "交流空间",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "咖啡厅，交流空间，思想讨论"
+  },
+  "书店": {
+    "type": "object",
+    "description": "阅读空间",
+    "symbolism": "知识获取",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "书店，知识获取，阅读空间"
+  },
+  "打印店": {
+    "type": "object",
+    "description": "资料输出",
+    "symbolism": "学习辅助",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "打印店，学习辅助，资料输出"
+  },
+  "公告栏": {
+    "type": "object",
+    "description": "校园通知",
+    "symbolism": "信息发布",
+    "related_entities": [
+      "群体"
+    ],
+    "historical_context": "公告栏，信息发布，校园通知"
+  },
+  "电子屏": {
+    "type": "object",
+    "description": "现代传播",
+    "symbolism": "数字信息",
+    "related_entities": [
+      "校园"
+    ],
+    "historical_context": "电子屏，数字信息，现代传播"
+  },
+  "无线网络": {
+    "type": "object",
+    "description": "数字时代",
+    "symbolism": "信息连接",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "无线网络，信息连接，数字时代"
+  },
+  "服务器": {
+    "type": "object",
+    "description": "信息处理",
+    "symbolism": "数据核心",
+    "related_entities": [
+      "科技"
+    ],
+    "historical_context": "服务器，数据核心，信息处理"
+  },
+  "云平台": {
+    "type": "object",
+    "description": "数据存储",
+    "symbolism": "虚拟空间",
+    "related_entities": [
+      "研究者"
+    ],
+    "historical_context": "云平台，虚拟空间，数据存储"
+  },
+  "代码": {
+    "type": "object",
+    "description": "程序逻辑",
+    "symbolism": "思维表达",
+    "related_entities": [
+      "工程师"
+    ],
+    "historical_context": "代码，思维表达，程序逻辑"
+  },
+  "算法": {
+    "type": "object",
+    "description": "数据处理",
+    "symbolism": "逻辑结构",
+    "related_entities": [
+      "研究者"
+    ],
+    "historical_context": "算法，逻辑结构，数据处理"
+  },
+  "模型": {
+    "type": "object",
+    "description": "现实模拟",
+    "symbolism": "抽象表达",
+    "related_entities": [
+      "学者"
+    ],
+    "historical_context": "模型，抽象表达，现实模拟"
+  },
+  "论文": {
+    "type": "object",
+    "description": "研究输出",
+    "symbolism": "学术成果",
+    "related_entities": [
+      "学者"
+    ],
+    "historical_context": "论文，学术成果，研究输出"
+  },
+  "期刊": {
+    "type": "object",
+    "description": "学术发表",
+    "symbolism": "知识传播",
+    "related_entities": [
+      "学者"
+    ],
+    "historical_context": "期刊，知识传播，学术发表"
+  },
+  "讲座": {
+    "type": "object",
+    "description": "学术活动",
+    "symbolism": "知识分享",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "讲座，知识分享，学术活动"
+  },
+  "论坛": {
+    "type": "object",
+    "description": "讨论平台",
+    "symbolism": "思想交流",
+    "related_entities": [
+      "群体"
+    ],
+    "historical_context": "论坛，思想交流，讨论平台"
+  },
+  "竞赛": {
+    "type": "object",
+    "description": "学生成长",
+    "symbolism": "能力挑战",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "竞赛，能力挑战，学生成长"
+  },
+  "奖杯": {
+    "type": "object",
+    "description": "成果体现",
+    "symbolism": "荣誉象征",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "奖杯，荣誉象征，成果体现"
+  },
+  "证书": {
+    "type": "object",
+    "description": "学习成果",
+    "symbolism": "能力证明",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "证书，能力证明，学习成果"
+  },
+  "实习单位": {
+    "type": "object",
+    "description": "实践经验",
+    "symbolism": "社会连接",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "实习单位，社会连接，实践经验"
+  },
+  "公司": {
+    "type": "object",
+    "description": "工作场所",
+    "symbolism": "职业发展",
+    "related_entities": [
+      "人物"
+    ],
+    "historical_context": "公司，职业发展，工作场所"
+  },
+  "城市街道": {
+    "type": "object",
+    "description": "现实环境",
+    "symbolism": "社会空间",
+    "related_entities": [
+      "人群"
+    ],
+    "historical_context": "城市街道，社会空间，现实环境"
+  },
+  "地铁站": {
+    "type": "object",
+    "description": "城市交通",
+    "symbolism": "流动空间",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "地铁站，流动空间，城市交通"
+  },
+  "机场": {
+    "type": "object",
+    "description": "未来发展",
+    "symbolism": "远行象征",
+    "related_entities": [
+      "人物"
+    ],
+    "historical_context": "机场，远行象征，未来发展"
+  },
+  "火车站": {
+    "type": "object",
+    "description": "离开与到达",
+    "symbolism": "过渡空间",
+    "related_entities": [
+      "人群"
+    ],
+    "historical_context": "火车站，过渡空间，离开与到达"
+  },
+  "行李箱": {
+    "type": "object",
+    "description": "出发象征",
+    "symbolism": "人生阶段",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "行李箱，人生阶段，出发象征"
+  },
+  "手机": {
+    "type": "object",
+    "description": "数字生活",
+    "symbolism": "信息终端",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "手机，信息终端，数字生活"
+  },
+  "耳机": {
+    "type": "object",
+    "description": "私人世界",
+    "symbolism": "个体空间",
+    "related_entities": [
+      "学子"
+    ],
+    "historical_context": "耳机，个体空间，私人世界"
+  },
+  "镜子": {
+    "type": "object",
+    "description": "反思象征",
+    "symbolism": "自我认知",
+    "related_entities": [
+      "人物"
+    ],
+    "historical_context": "镜子，自我认知，反思象征"
+  },
+  "影子": {
+    "type": "object",
+    "description": "历史残留",
+    "symbolism": "时间痕迹",
+    "related_entities": [
+      "空间"
+    ],
+    "historical_context": "影子，时间痕迹，历史残留"
+  }
 }

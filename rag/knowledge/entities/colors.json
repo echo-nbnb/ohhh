@@ -1,15 +1,308 @@
 {
-  "_template": "颜色实体模板",
-  "_description": "每个颜色实体的JSON结构",
-  "_example": {
-    "岳麓绿": {
-      "type": "color",
-      "description": "绿色，生命的颜色",
-      "color": "#2E7D32",
-      "symbolism": "生长、传承、根脉",
-      "related_entities": ["书院", "古树"],
-      "historical_context": "岳麓书院千年古木，象征学问传承"
-    }
+  "岳麓绿": {
+    "type": "color",
+    "description": "岳麓书院千年古木",
+    "color": "#2E7D32",
+    "symbolism": "学术传承",
+    "related_entities": [
+      "书院",
+      "学子"
+    ],
+    "historical_context": "岳麓绿，学术传承，岳麓书院千年古木",
+    "mood": "平静",
+    "era": "古代",
+    "theme": "学术"
   },
-  "_TODO": "请填充12个模块对应的颜色实体"
+  "湖湘红": {
+    "type": "color",
+    "description": "湖南革命传统",
+    "color": "#B71C1C",
+    "symbolism": "革命精神",
+    "related_entities": [
+      "湘江",
+      "人群"
+    ],
+    "historical_context": "湖湘红，革命精神，湖南革命传统",
+    "mood": "激昂",
+    "era": "近代",
+    "theme": "革命"
+  },
+  "湘水蓝": {
+    "type": "color",
+    "description": "湘江贯穿历史",
+    "color": "#1565C0",
+    "symbolism": "思想流动",
+    "related_entities": [
+      "湘江",
+      "桥梁"
+    ],
+    "historical_context": "湘水蓝，思想流动，湘江贯穿历史",
+    "mood": "冷静",
+    "era": "跨时代",
+    "theme": "思想"
+  },
+  "书卷白": {
+    "type": "color",
+    "description": "书院教育精神",
+    "color": "#F5F0E8",
+    "symbolism": "求知初心",
+    "related_entities": [
+      "书卷",
+      "学子"
+    ],
+    "historical_context": "书卷白，求知初心，书院教育精神",
+    "mood": "宁静",
+    "era": "古代",
+    "theme": "学术"
+  },
+  "荣光金": {
+    "type": "color",
+    "description": "湖南大学现代化",
+    "color": "#FFD700",
+    "symbolism": "成就发展",
+    "related_entities": [
+      "校园",
+      "建筑"
+    ],
+    "historical_context": "荣光金，成就发展，湖南大学现代化",
+    "mood": "庄重",
+    "era": "现代",
+    "theme": "发展"
+  },
+  "历史黑": {
+    "type": "color",
+    "description": "校史沉淀",
+    "color": "#212121",
+    "symbolism": "厚重记忆",
+    "related_entities": [
+      "碑刻",
+      "遗迹"
+    ],
+    "historical_context": "历史黑，厚重记忆，校史沉淀",
+    "mood": "压抑",
+    "era": "跨时代",
+    "theme": "历史"
+  },
+  "晨曦橙": {
+    "type": "color",
+    "description": "新生入学",
+    "color": "#FF9800",
+    "symbolism": "新生开始",
+    "related_entities": [
+      "校门"
+    ],
+    "historical_context": "晨曦橙，新生开始，新生入学",
+    "mood": "温暖",
+    "era": "现代",
+    "theme": "校园"
+  },
+  "夜读紫": {
+    "type": "color",
+    "description": "夜晚学习",
+    "color": "#4A148C",
+    "symbolism": "沉思学习",
+    "related_entities": [
+      "灯光"
+    ],
+    "historical_context": "夜读紫，沉思学习，夜晚学习",
+    "mood": "安静",
+    "era": "现代",
+    "theme": "学术"
+  },
+  "烟雨灰": {
+    "type": "color",
+    "description": "湖南气候",
+    "color": "#9E9E9E",
+    "symbolism": "时间朦胧",
+    "related_entities": [
+      "湘江",
+      "天空"
+    ],
+    "historical_context": "烟雨灰，时间朦胧，湖南气候",
+    "mood": "柔和",
+    "era": "跨时代",
+    "theme": "记忆"
+  },
+  "墨韵蓝": {
+    "type": "color",
+    "description": "朱熹讲学",
+    "color": "#1A237E",
+    "symbolism": "理学思想",
+    "related_entities": [
+      "讲堂"
+    ],
+    "historical_context": "墨韵蓝，理学思想，朱熹讲学",
+    "mood": "深沉",
+    "era": "古代",
+    "theme": "学术"
+  },
+  "青石灰": {
+    "type": "color",
+    "description": "石阶建筑",
+    "color": "#607D8B",
+    "symbolism": "历史质感",
+    "related_entities": [
+      "书院"
+    ],
+    "historical_context": "青石灰，历史质感，石阶建筑",
+    "mood": "厚重",
+    "era": "古代",
+    "theme": "历史"
+  },
+  "霞光粉": {
+    "type": "color",
+    "description": "温暖时刻",
+    "color": "#F8BBD0",
+    "symbolism": "情绪记忆",
+    "related_entities": [
+      "人物"
+    ],
+    "historical_context": "霞光粉，情绪记忆，温暖时刻",
+    "mood": "温柔",
+    "era": "跨时代",
+    "theme": "情感"
+  },
+  "深林绿": {
+    "type": "color",
+    "description": "林间隐喻",
+    "color": "#1B5E20",
+    "symbolism": "思想深度",
+    "related_entities": [
+      "树林"
+    ],
+    "historical_context": "深林绿，思想深度，林间隐喻",
+    "mood": "安静",
+    "era": "古代",
+    "theme": "思想"
+  },
+  "铁锈红": {
+    "type": "color",
+    "description": "建筑变化",
+    "color": "#8B4513",
+    "symbolism": "时间侵蚀",
+    "related_entities": [
+      "遗迹"
+    ],
+    "historical_context": "铁锈红，时间侵蚀，建筑变化",
+    "mood": "压抑",
+    "era": "近代",
+    "theme": "历史"
+  },
+  "云雾白": {
+    "type": "color",
+    "description": "思想未明",
+    "color": "#ECEFF1",
+    "symbolism": "模糊过渡",
+    "related_entities": [
+      "天空"
+    ],
+    "historical_context": "云雾白，模糊过渡，思想未明",
+    "mood": "轻盈",
+    "era": "跨时代",
+    "theme": "过渡"
+  },
+  "湖面蓝": {
+    "type": "color",
+    "description": "湘江水面",
+    "color": "#42A5F5",
+    "symbolism": "自我映照",
+    "related_entities": [
+      "水面"
+    ],
+    "historical_context": "湖面蓝，自我映照，湘江水面",
+    "mood": "平和",
+    "era": "跨时代",
+    "theme": "思考"
+  },
+  "光影金": {
+    "type": "color",
+    "description": "历史时刻",
+    "color": "#FFC107",
+    "symbolism": "高光瞬间",
+    "related_entities": [
+      "人群"
+    ],
+    "historical_context": "光影金，高光瞬间，历史时刻",
+    "mood": "强烈",
+    "era": "现代",
+    "theme": "记忆"
+  },
+  "暮色橙": {
+    "type": "color",
+    "description": "一天结束",
+    "color": "#FF5722",
+    "symbolism": "回望过去",
+    "related_entities": [
+      "校园"
+    ],
+    "historical_context": "暮色橙，回望过去，一天结束",
+    "mood": "温暖",
+    "era": "现代",
+    "theme": "回忆"
+  },
+  "石墨黑": {
+    "type": "color",
+    "description": "理论沉淀",
+    "color": "#37474F",
+    "symbolism": "思想凝固",
+    "related_entities": [
+      "思想家"
+    ],
+    "historical_context": "石墨黑，思想凝固，理论沉淀",
+    "mood": "压抑",
+    "era": "古代",
+    "theme": "学术"
+  },
+  "松柏绿": {
+    "type": "color",
+    "description": "松柏精神",
+    "color": "#2E7D32",
+    "symbolism": "坚韧不朽",
+    "related_entities": [
+      "山林"
+    ],
+    "historical_context": "松柏绿，坚韧不朽，松柏精神",
+    "mood": "稳重",
+    "era": "古代",
+    "theme": "精神"
+  },
+  "烈日黄": {
+    "type": "color",
+    "description": "校园活力",
+    "color": "#FDD835",
+    "symbolism": "行动现实",
+    "related_entities": [
+      "学生"
+    ],
+    "historical_context": "烈日黄，行动现实，校园活力",
+    "mood": "明亮",
+    "era": "现代",
+    "theme": "校园"
+  },
+  "冷光蓝": {
+    "type": "color",
+    "description": "实验室氛围",
+    "color": "#0277BD",
+    "symbolism": "科技理性",
+    "related_entities": [
+      "研究者"
+    ],
+    "historical_context": "冷光蓝，科技理性，实验室氛围",
+    "mood": "冷静",
+    "era": "现代",
+    "theme": "科技"
+  },
+  "灰白调": {
+    "type": "color",
+    "description": "过渡时期",
+    "color": "#BDBDBD",
+    "symbolism": "中性状态",
+    "related_entities": [
+      "空间"
+    ],
+    "historical_context": "灰白调，中性状态，过渡时期",
+    "mood": "平和",
+    "era": "跨时代",
+    "theme": "过渡"
+  }
 }

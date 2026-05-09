@@ -35,7 +35,7 @@ from .generator import (
     NarrativeGenerator,
     GenerationConfig,
     LocalGenerator,
-    CloudGenerator,
+    AliCloudGenerator as CloudGenerator,
     create_generator
 )
 
