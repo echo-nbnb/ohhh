@@ -105,28 +105,34 @@ class UnityServer:
         """
         处理收到的消息
 
-        消息格式:
+        消息格式（两种字段名都支持）:
         {
             "event": "module_placed" | "module_connected" | "generation_start",
-            "module_id": "...",
-            "from_module": "...",
-            "to_module": "...",
+            "type": "object_selected" | "character_selected" | "wheel_*",
             ...
         }
         """
         try:
             data = json.loads(message)
-            event = data.get("event", "")
+            event = data.get("event", "") or data.get("type", "")
 
             print(f"[Server] 收到事件: {event}")
             print(f"[Server] 数据: {data}")
 
-            if event == "module_placed":
+            if event in ("module_placed",):
                 self.handle_module_placed(data)
-            elif event == "module_connected":
+            elif event in ("module_connected",):
                 self.handle_module_connected(data)
-            elif event == "generation_start":
+            elif event in ("generation_start",):
                 self.handle_generation_start(data)
+            elif event in ("object_selected",):
+                self.handle_object_selected(data)
+            elif event in ("character_selected",):
+                self.handle_character_selected(data)
+            elif event in ("wheel_group_changed",):
+                self.handle_wheel_group_changed(data)
+            elif event in ("wheel_character_selected",):
+                self.handle_wheel_character_selected(data)
             else:
                 print(f"[Server] 未知事件: {event}")
 
@@ -134,6 +140,56 @@ class UnityServer:
             print(f"[Server] JSON解析失败: {e}")
         except Exception as e:
             print(f"[Server] 处理失败: {e}")
+
+    # ── Phase 2: Act 2 物象选择 ──────────────────────────
+
+    def handle_object_selected(self, data: Dict):
+        """Unity 用户确认选中物象"""
+        object_name = data.get("name", "")
+        print(f"[Server] 物象已选中: {object_name}")
+        # 将物象注册为模块
+        module_id = f"object_{object_name}"
+        self.rag_system.register_module(module_id, "object", object_name) if self.rag_system else None
+        self.send({
+            "type": "object_confirmed",
+            "module_id": module_id,
+            "entity": object_name,
+            "description": f"物象「{object_name}」已确认",
+            "unity_data": {"node_color": "#FFFFFF"}
+        })
+
+    # ── Phase 3: Act 3 人物选择 ──────────────────────────
+
+    def handle_character_selected(self, data: Dict):
+        """Unity 用户确认选中人物（推荐阶段）"""
+        char_name = data.get("name", "")
+        print(f"[Server] 人物已选中（推荐）: {char_name}")
+        module_id = f"character_{char_name}"
+        self.rag_system.register_module(module_id, "character", char_name) if self.rag_system else None
+        self.send({
+            "type": "character_confirmed",
+            "module_id": module_id,
+            "entity": char_name
+        })
+
+    # ── Phase 4: Act 3 轮盘 ──────────────────────────────
+
+    def handle_wheel_group_changed(self, data: Dict):
+        """Unity 用户切换轮盘分组"""
+        group = data.get("group", "")
+        print(f"[Server] 轮盘分组切换: {group}")
+
+    def handle_wheel_character_selected(self, data: Dict):
+        """Unity 用户从轮盘选中人物"""
+        char_name = data.get("name", "")
+        print(f"[Server] 人物已选中（轮盘）: {char_name}")
+        module_id = f"character_{char_name}"
+        self.rag_system.register_module(module_id, "character", char_name) if self.rag_system else None
+        self.send({
+            "type": "character_confirmed",
+            "module_id": module_id,
+            "entity": char_name
+        })
 
     def handle_module_placed(self, data: Dict):
         """处理模块放置"""

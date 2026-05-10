@@ -12,6 +12,11 @@ from .region_detector import (
     RegionCalibrator, RegionDetector, ManualRegionSelector,
     create_calibrator, create_region_detector, create_manual_selector
 )
+from .gesture_state_machine import (
+    GestureStateMachine, GestureMode, GestureType,
+    DrawingSubState, CandidateSubState, CharRecommendSubState, CharWheelSubState,
+    create_gesture_state_machine
+)
 
 __all__ = [
     'IPCamera',
@@ -31,4 +36,12 @@ __all__ = [
     'create_calibrator',
     'create_region_detector',
     'create_manual_selector',
+    'GestureStateMachine',
+    'GestureMode',
+    'GestureType',
+    'DrawingSubState',
+    'CandidateSubState',
+    'CharRecommendSubState',
+    'CharWheelSubState',
+    'create_gesture_state_machine',
 ]

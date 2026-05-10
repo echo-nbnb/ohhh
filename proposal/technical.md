@@ -426,9 +426,9 @@ def generate_prompt(user_input):
 | | 视觉生成 | ✅ 已实现（wanx-v1 万象） |
 | | 云端API | ✅ 已接入 |
 | | **明信片合成** | ✅ 已实现（postcard.py 重写布局引擎） |
-| **模块四** | Unity通信 | ⚠️ 部分实现 |
-| | 手势数据发送 | ⚠️ 部分实现 |
-| | Unity工程 | ❌ 未实现 |
+| **模块四** | Unity通信 | ✅ sender.py 统一发送器 + C# 消息路由 |
+| | 手势数据发送 | ✅ UnitySender.send_hand_data() |
+| | Unity工程 | ✅ 端到端集成测试通过（Phase 5/5 除轮盘外完成，物象/人物卡片/手势状态 UI + 手部实时可视化已就绪） |
 | **生图转换** | 生成图像提示词 | ✅ 已实现 |
 
 ---
@@ -442,11 +442,13 @@ def generate_prompt(user_input):
 | 模块一：视觉定位与融合 | 8 | 7 | 1 | 0 | **88%** |
 | 模块二：RAG 检索与生成 | 6 | 6 | 0 | 0 | **100%** |
 | 模块三：多模态内容生成 | 5 | 5 | 0 | 0 | **100%** |
-| 模块四：Unity 渲染交互 | 3 | 0 | 2 | 1 | **17%** |
+| 模块四：Unity 渲染交互 | 3 | 3 | 0 | 0 | **100%** |
 | 生图提示词转换 | 1 | 1 | 0 | 0 | **100%** |
-| **总计** | **23** | **19** | **3** | **1** | **~87%** |
+| **总计** | **23** | **22** | **1** | **0** | **~96%** |
 
 > 模块二说明：检索采用精确匹配+双向查找（BM25 模糊检索为 P2 搁置，非必需）。输入输出接口全部实现（`RAGSystem` 类）。连接图分析（`_analyze_connections`）、模板+LLM融合叙事、明信片端到端管道均已可用。模块二已基本完成。
+>
+> 模块四说明：2026-05-10 完成端到端集成测试，test_integrated.py 串联摄像头→手部跟踪→手势状态机→草图识别→人物推荐→Unity 双端口通信全链路。物象/人物卡片 UI、手势状态指示器、手部骨架实时可视化均已就绪。
 
 ### 按可运行能力评估
 
@@ -455,11 +457,11 @@ def generate_prompt(user_input):
 | 摄像头 → YOLO 检测+MOT跟踪 → 数据融合 | ✅ 端到端可跑 |
 | 融合数据 → RAG 知识检索 → 实时描述 | ✅ 端到端可跑 |
 | 检索上下文 → 叙事生成 → 图像生成 → 明信片合成 | ✅ 端到端可跑 |
-| Python 端 → Unity 实时渲染 | ❌ 未打通 |
+| Python 端 → Unity 实时渲染 | ✅ 端到端联调通过（手势→识别→候选卡片+手部实时可视化） |
 | ESP32 硬件模块通信 | ⚠️ 备选方案，非主线 |
 | QuickDraw 模型训练 | ✅ 82 类训练完成，val acc 83.8%，ONNX 已导出 |
 
-**核心 AI 管线 ~97%，Unity 交互层 ~17%，整体 ~87%。**
+**核心 AI 管线 ~97%，Unity 交互层 ~100%（端到端联调通过），整体 ~96%。**
 
 ---
 
@@ -810,13 +812,13 @@ Top-3 推荐人物 + 推荐理由
 
 **需要开发的子任务**：
 
-| 任务 | 说明 | 优先级 |
-|------|------|--------|
-| 多模式状态机基类 | Mode + SubState 二级状态管理 | P0 |
-| 食指伸出检测 | `_recognize_index_pointing()`：仅食指伸展（landmark 8 tip < mcp），其余握起 | P0 |
-| 绘画模式 | 轨迹录制 `List[(x,y,t)]`、握拳结束、张手清空 | P0 |
-| 水平位移检测 | 连续帧手掌 x 坐标差值 → 轮盘滚动速度映射 | P1 |
-| 静止计时器 | 手掌在卡片区域内静止 > 1s 触发悬停预览 | P1 |
+| 任务 | 说明 | 优先级 | 状态 |
+|------|------|--------|------|
+| 多模式状态机基类 | Mode + SubState 二级状态管理 | P0 | ✅ |
+| 食指伸出检测 | `_recognize_index_pointing()`：仅食指伸展（landmark 8 tip < mcp），其余握起 | P0 | ✅ |
+| 绘画模式 | 轨迹录制 `List[(x,y,t)]`、握拳结束、张手清空 | P0 | ✅ |
+| 水平位移检测 | 连续帧手掌 x 坐标差值 → 轮盘滚动速度映射 | P1 | ⏸️ 暂缓 |
+| 静止计时器 | 手掌在卡片区域内静止 > 1s 触发悬停预览 | P1 | ✅ |
 
 ---
 
@@ -826,8 +828,8 @@ Top-3 推荐人物 + 推荐理由
 |------|------|---------|
 | **RAG 检索** | `rag/knowledge_base.py` | 新增 `search_characters_by_color_object(color, objects)` 人物推荐检索接口 |
 | **数据融合** | `vision/data_fusion/fuse.py` | 新增 `event_type`：`sketch_completed`、`object_candidate_selected`、`character_recommended`、`character_wheel_selected` |
-| **Unity Bridge** | `unity_bridge/` | 新增消息类型：候选物象卡片数据、人物推荐卡片数据、轮盘状态数据 |
-| **手势连接** | `vision/gesture_connection.py` | 状态机扩展为多模式（见 §11.5），食指伸出检测 |
+| **Unity Bridge** | `unity_bridge/` | ✅ 新增消息类型已定义（sender.py + DataTypes.cs + PythonConnection.cs 路由） |
+| **手势连接** | `vision/gesture_connection.py` | ✅ 多模式状态机已新建 `gesture_state_machine.py`，食指伸出检测+轨迹录制 |
 
 ---
 
@@ -848,40 +850,112 @@ unity_bridge/server.py  :8888  ←→  TCP Client (C#)
 unity_bridge/hand_server.py :8889  →  TCP Client (C#)
   └── hand_tracking (每帧)
 
-unity_bridge/sender.py  空文件 ← 待实现
+unity_bridge/sender.py  ✅ 已实现（Phase 1, 2026-05-10）
+  ├── UnitySender 类：双端口(:8888 + :8889)，自动重连
+  ├── send_object_candidates / send_character_candidates / send_wheel_state
+  ├── send_gesture_state / send_hand_data
+  └── send_raw（失败自动重连重试）
 ```
 
-已实现的消息类型见 §11.6 上方表格。
+Unity C# 端同步更新（Phase 1, 2026-05-10）：
+- `DataTypes.cs`：新增 12 个数据类型（ObjectCandidatesData, CharacterCandidatesData, WheelStateData, GestureStateData, BaseMessage 等），补全 ConnectionType 枚举（6 种），新增 InteractionMode 枚举
+- `PythonConnection.cs`：重写消息路由为 `type` 字段 switch 分发，新增 5 个事件 + 5 个发送方法
 
 #### 11.7.2 实现顺序
 
-| 阶段 | 内容 | 说明 |
-|------|------|------|
-| **一** | `sender.py` 统一发送器 | 封装 TCP 发送逻辑，支持重连、多端口。所有 Python→Unity 推送统一入口 |
-| **二** | Act 2 物象候选 | 新增 `object_candidates` (Py→Unity) + `object_selected` (Unity→Py) |
-| **三** | Act 3 人物推荐 | 新增 `character_candidates` + `character_selected` 消息 |
-| **四** | Act 3 人物轮盘 | 新增 `wheel_state` + `wheel_selected` 消息 |
-| **五** | 手势状态机接驳 | `gesture_connection.py` 多模式状态机回调 → `UnitySender` |
+| 阶段 | 内容 | 说明 | 状态 |
+|------|------|------|------|
+| **一** | `sender.py` 统一发送器 | 封装 TCP 发送逻辑，支持重连、多端口。所有 Python→Unity 推送统一入口 | ✅ |
+| **二** | Act 2 物象候选 | 新增 `object_candidates` (Py→Unity) + `object_selected` (Unity→Py) | ✅ |
+| **三** | Act 3 人物推荐 | 新增 `character_candidates` + `character_selected` 消息 | ✅ |
+| **四** | Act 3 人物轮盘 | 新增 `wheel_state` + `wheel_selected` 消息 | ⏸️ 暂缓 |
+| **五** | 手势状态机接驳 | `gesture_connection.py` 多模式状态机回调 → `UnitySender` | ✅ |
+
+#### 11.7.2.1 Phase 2 实现详情（2026-05-10）
+
+**Python 端**：
+- `server.py`：新增 `handle_object_selected()`、`handle_character_selected()`、`handle_wheel_*` 处理函数，process_message 同步兼容 `event` 和 `type` 两种字段名
+- `sketch_bridge.py`（新建）：`SketchBridge` 类，连接 `SketchRecognizer` + `UnitySender`，提供 `add_point()` → `commit()` → 自动识别+发送候选 的完整管线
+
+**Unity C# 端**：
+- `ObjectCandidateUI.cs`（新建）：3 张横向候选卡片 UI，鼠标悬停高亮 + 点击确认，`OnObjectCandidates` 事件驱动，选择后通过 `PythonConnection.SendObjectSelected()` 回传
+- `PythonConnection.cs`：新增 `object_confirmed` / `character_confirmed` 消息路由
+
+**端到端数据流**：
+```
+指尖轨迹 → SketchBridge.commit()
+  → SketchRecognizer.recognize() → Top-3 物象
+  → UnitySender.send_object_candidates()
+  → Unity ObjectCandidateUI 显示 3 张卡片
+  → 用户点击选择
+  → PythonConnection.SendObjectSelected()
+  → server.py handle_object_selected()
+  → 物象注册为模块 → object_confirmed 回传 Unity
+```
+
+#### 11.7.2.2 Phase 3 实现详情（2026-05-10）
+
+**Python 端**：
+- `character_bridge.py`（新建）：`CharacterBridge` 类，连接 `CharacterRecommender` + `UnitySender`，`set_context()` → `recommend()` → 自动推荐+发送候选
+
+**Unity C# 端**：
+- `CharacterCandidateUI.cs`（新建）：3 张人物推荐卡片 UI，显示姓名+称号+推荐理由+得分条，左键选中、右键拒绝（→ 进入轮盘）
+
+**端到端数据流**：
+```
+颜色 + 已选物象 → CharacterBridge.recommend()
+  → CharacterRecommender.recommend() → Top-3 人物
+  → UnitySender.send_character_candidates()
+  → Unity CharacterCandidateUI 显示 3 张人物卡片
+  → 用户左键选择 / 右键拒绝
+  → PythonConnection.SendCharacterSelected()
+  → server.py handle_character_selected()
+  → 人物注册为模块 → character_confirmed 回传 Unity
+```
+
+#### 11.7.2.3 Phase 5 实现详情（2026-05-10）
+
+**Python 端**：
+- `vision/gesture_state_machine.py`（新建）：`GestureStateMachine` 多模式状态机
+  - 5 个顶层模式：GLOBAL / DRAWING / CANDIDATE / CHAR_RECOMMEND / CHAR_WHEEL
+  - 每模式子状态枚举
+  - 手势检测：`_recognize_gesture()` 支持食指伸出/握拳/张手
+  - 绘画轨迹录制：食指指尖 (landmark 8) 自动累积 `(x, y, ts_ms)`
+  - 回调接口：`on_mode_change` → UnitySender.send_gesture_state(), `on_drawing_commit` → SketchBridge.commit()
+  - 外部触发：`trigger_char_recommend()`, `trigger_object_candidates()`, `reset_to_global()`
+
+**Unity C# 端**：
+- `GestureStateUI.cs`（新建）：屏幕右上角模式指示器，中文模式名+子状态+手势名
+
+**手势检测规则**：
+| 手势 | 规则 |
+|------|------|
+| 食指伸出 | 食指 tip.y < MCP.y - 0.03，其余三指 tip.y > MCP.y |
+| 握拳 | 四指全部 tip.y > MCP.y - 0.03 |
+| 张手 | 四指全部 tip.y < MCP.y - 0.03 |
 
 #### 11.7.3 新增消息类型规格
 
-**Phase 1 — sender.py 接口**
+**Phase 1 — sender.py 接口** ✅ 已完成（2026-05-10）
 
 ```python
 class UnitySender:
     """Python → Unity 统一消息发送器"""
-    def __init__(self, host="127.0.0.1", port=8888, hand_port=8889):
-        ...
-    def send(self, data: dict) -> bool:
-        """发送 JSON 消息，自动追加 \n，返回是否成功"""
+    def __init__(self, host="127.0.0.1", port=8888, hand_port=8889): ...
+    def connect(self) -> bool: ...
+    def connect_hand(self) -> bool: ...
+    def reconnect(self) -> bool: ...        # 重连所有通道
+    def send(self, data: dict) -> bool: ... # 底层发送，自动追加 \n
+    def send_raw(self, data: dict) -> bool: ...  # 失败自动重连重试
     def send_object_candidates(self, color, candidates): ...
     def send_character_candidates(self, candidates): ...
     def send_wheel_state(self, groups, current_group, characters, highlighted): ...
-    def send_hand_data(self, landmarks, palm_center): ...  # 迁移已有逻辑
+    def send_gesture_state(self, mode, sub_state, gesture): ...
+    def send_hand_data(self, landmarks, palm_center, ...): ...
     def close(self): ...
 ```
 
-**Phase 2 — Act 2 物象候选**
+**Phase 2 — Act 2 物象候选** ✅ 已完成（2026-05-10）
 
 ```
 Python → Unity: object_candidates
@@ -902,7 +976,7 @@ Unity → Python: object_selected
 }
 ```
 
-**Phase 3 — Act 3 人物推荐**
+**Phase 3 — Act 3 人物推荐** ✅ 已完成（2026-05-10）
 
 ```
 Python → Unity: character_candidates
@@ -1002,22 +1076,90 @@ void OnMessage(string json) {
 
 ```
 P0（核心通路必须跑通）：
-  1. sender.py 统一发送器
-  2. object_candidates / object_selected 消息（Act 2 通路）
-  3. character_candidates / character_selected 消息（Act 3 推荐通路）
-  4. wheel_state / wheel_character_selected 消息（Act 3 轮盘通路）
-  5. 手势状态机多模式框架
-  6. 食指伸出检测 + 轨迹录制
-  7. QuickDraw ONNX 模型推理（✅ 已完成）
-  8. 人物推荐引擎接口（✅ 已完成）
+  1. sender.py 统一发送器                                        ✅ 已完成
+  2. object_candidates / object_selected 消息（Act 2 通路）      ✅ 已完成
+  3. character_candidates / character_selected 消息（Act 3 推荐通路） ✅ 已完成
+  4. wheel_state / wheel_character_selected 消息（Act 3 轮盘通路） ⏸️ 暂缓
+  5. 手势状态机多模式框架                                        ✅ 已完成
+  6. 食指伸出检测 + 轨迹录制                                     ✅ 已完成
+  7. QuickDraw ONNX 模型推理                                     ✅ 已完成
+  8. 人物推荐引擎接口                                            ✅ 已完成
 
 P1（完整体验）：
-  9. gesture_state 消息（状态机状态同步到 Unity）
-  10. 颜色上下文加权排序（✅ 已完成）
-  11. 轮盘分组切换（Unity→Python→更新 wheel_state）
-  12. Unity C# 候选卡片 UI + 轮盘 UI
-
-P2（优化打磨）：
-  13. sender.py 断线重连逻辑
-  14. 轮盘悬停计时预览
+  9. gesture_state 消息（状态机状态同步到 Unity）                 ✅ 已完成
+  10. 颜色上下文加权排序                                         ✅ 已完成
+  11. 轮盘分组切换（Unity→Python→更新 wheel_state）               ⏸️ 暂缓
+  12. Unity C# 候选卡片 UI + 轮盘 UI                              ✅ 已完成（物象/人物卡片 UI 已就绪）
 ```
+
+---
+
+### 11.9 端到端集成测试（2026-05-10）
+
+#### 11.9.1 集成测试脚本
+
+**`test_integrated.py`** — 完整集成测试入口，一个脚本串联所有模块：
+
+```
+摄像头 → HandTracker(MediaPipe) → GestureStateMachine(5模式)
+                                   ├→ SketchBridge(草图识别) → object_candidates → Unity :8888
+                                   ├→ CharacterBridge(人物推荐) → character_candidates → Unity :8888
+                                   └→ 手部landmark数据 → Unity :8889
+```
+
+**启动方式**：
+```bash
+# 完整模式（含 OpenCV 可视化窗口）
+python test_integrated.py [摄像头URL]
+
+# 无显示模式（延迟最低，推荐配合 Unity 使用）
+python test_integrated_fast.py [摄像头URL]
+```
+
+**无摄像头时**自动进入演示模式，键盘 1/2/3 模拟食指/握拳/张手，1-6 切换颜色。
+
+#### 11.9.2 集成测试发现并修复的问题
+
+| # | 问题 | 原因 | 修复 |
+|---|------|------|------|
+| 1 | 时间戳非单调递增 | 每帧调两次 `_detect()`，第二次时间戳相同 | 一次检测复用结果，直接计算像素坐标 |
+| 2 | Unity 始终连不上 | `is_running = True` 在 `_start_servers()` 之后设置，accept 线程立即退出 | 移动 `is_running` 到 `_start_servers()` 之前 |
+| 3 | gesture_state 消息丢失 | `client.settimeout(0.5)` 导致主线程 `sendall` 也可能超时并静默断开 | 改用 `select.select()` 隔离收发超时 |
+| 4 | Unity C# 解析手部数据失败 | `HandTrackingData.cs` 字段为 `contour`/`bounding_box`，不匹配 Python 发送的 `landmarks`/`fingertips` | 重写 `HandTrackingData` 匹配新数据格式 |
+| 5 | Unity 手部可视化不显示 | 原 `HandTrackingVisualizer` 使用世界空间 Sprite，坐标系不对 | 重写为 Canvas UI 版本，Screen Space Overlay |
+| 6 | 手部显示位置偏移/不占满屏 | `CanvasScaler` 参考分辨率默认 800x600 | 设为 1920x1080，新增 `positionScale`/`positionOffset`/`flipX`/`flipY` 可调参数 |
+| 7 | 延迟高 | Nagle 算法缓冲 + OpenCV 显示开销 + 摄像头帧堆积 | 双方 TCP_NODELAY + 缓冲排空 + `--no-display` 模式 |
+
+#### 11.9.3 延迟优化方案
+
+```
+优化项                           预期收益
+─────────────────────────────────────────
+TCP_NODELAY (双方)              消除 ~200ms 缓冲延迟
+摄像头缓冲排空（每帧连读4次）    消除 2-3 帧旧数据堆积
+--no-display 模式               省去 frame.copy() + cv2.imshow
+Canvas UI 可视化（替代 Sprite）  直接屏幕像素映射，无坐标转换
+预创建对象池（无 GC 分配）       消除每帧内存抖动
+```
+
+#### 11.9.4 当前数据流状态
+
+```
+Python (:8888 主通道) ──→ Unity PythonConnection
+  · object_candidates     → ObjectCandidateUI（3 张候选卡片）
+  · character_candidates  → CharacterCandidateUI（3 张推荐卡片）
+  · gesture_state         → GestureStateUI（右上角模式指示器）
+  · connected / confirmed → 连接管理
+
+Python (:8889 手部通道) ──→ Unity HandTrackingConnection
+  · hand_tracking（每帧） → HandTrackingVisualizer（21 点骨架 + 指尖高亮）
+```
+
+#### 11.9.5 待后续完成（美术阶段）
+
+- [ ] 候选卡片替换为美术素材（当前为代码生成的纯色方块）
+- [ ] 手势状态指示器美化（当前为纯文本）
+- [ ] 手部骨架可视化风格化（当前为纯色圆点+线条）
+- [ ] 轮盘浏览 UI（Phase 4，暂缓）
+- [ ] 颜色选择 UI（第一幕入口）
+- [ ] 动画过渡效果（卡片出现/消失、模式切换）
