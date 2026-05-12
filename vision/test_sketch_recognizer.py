@@ -1,25 +1,34 @@
 """
-草图识别简单测试 —— 摄像头前用手势画画
+草图识别测试 —— IP 摄像头 + 手势绘画识别
 
 操作：
   - 伸出食指 → 绘画（指尖轨迹实时显示）
   - 握拳 → 识别（显示 Top-3 候选物象）
   - 五指张开 → 清空，重画
+  - 数字键 1-6 → 切换颜色
   - 按 Q → 退出
 
-依赖：摄像头 + MediaPipe（项目中已有 hand_tracker.py）
+依赖：IP 摄像头 + MediaPipe
 """
 
 import cv2
 import numpy as np
 import sys
 import os
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from vision.hand_tracker import HandTracker
 from vision.hand_detector import HandLandmarkIndex
 from vision.sketch_recognizer import create_sketch_recognizer
+from vision.ipcamera import IPCamera
+
+# IP 摄像头地址
+try:
+    from config_ipcam import CAMERA_URL
+except ImportError:
+    CAMERA_URL = "http://10.194.3.133:8080/video"
 
 
 def is_index_pointing(landmarks) -> bool:
@@ -88,9 +97,18 @@ def main():
         print(f"ONNX 模型: {'已加载' if ok else '加载失败，使用启发式降级'}")
     else:
         print(f"ONNX 模型不存在 ({model_path})，使用启发式降级")
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    # 连接 IP 摄像头
+    print(f"连接摄像头: {CAMERA_URL}")
+    camera = IPCamera(CAMERA_URL)
+    if not camera.connect():
+        print("摄像头连接失败！尝试 USB 摄像头...")
+        cap = cv2.VideoCapture(0)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        use_ipcam = False
+    else:
+        print("IP 摄像头已连接")
+        use_ipcam = True
 
     # 状态
     trajectory = []          # 当前轨迹
@@ -107,9 +125,20 @@ def main():
     print("数字键 1-6 切换颜色\n")
 
     while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+        if use_ipcam:
+            # 排空缓冲，取最新帧
+            frame = None
+            for _ in range(4):
+                f = camera.read_frame()
+                if f is not None:
+                    frame = f
+            if frame is None:
+                time.sleep(0.005)
+                continue
+        else:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
         frame = cv2.flip(frame, 1)
         h, w = frame.shape[:2]
@@ -224,7 +253,10 @@ def main():
             current_color = colors[current_color_idx]
             print(f"切换颜色: {current_color}")
 
-    cap.release()
+    if use_ipcam:
+        camera.release()
+    else:
+        cap.release()
     cv2.destroyAllWindows()
     tracker.close()
 

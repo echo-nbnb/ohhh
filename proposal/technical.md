@@ -15,7 +15,7 @@
 │       └────────┼────────┘                              │
 │                │                                       │
 │         ┌──────▼──────┐                               │
-│         │   摄像头    │ ← 俯拍检测类型+位置            │
+│         │   摄像头    │ ← 俯拍检测类型+位置 + 手部追踪 │
 │         └──────┬──────┘                               │
 └────────────────┼────────────────────────────────────────┘
                  │
@@ -33,7 +33,7 @@
           │                     │                            │
           │  ┌──────────────────┴────────────────────────┐  │
           │  │         RAG 检索生成                       │  │
-          │  │   文化内容匹配 → 生成控制指令               │  │
+          │  │   知识库检索 → LLM 归因 → 叙事 + 生图      │  │
           │  └──────────────────┬────────────────────────┘  │
           └─────────────────────┼───────────────────────────┘
                                 │
@@ -43,1112 +43,330 @@
                                 │
                           ┌─────▼─────┐
                           │  投影仪   │
-                          └─────┬─────┘
-                                │
-                          云端大模型 → 多模态故事内容
+                          └───────────┘
 ```
+
+**数据流**：摄像头帧 → 颜色牌检测 + 手部追踪 → 手势状态机 → 草图识别/人物推荐 → RAG 叙事生成 → 双端口 TCP → Unity 渲染
 
 ---
 
-## 二、RAG在技术路径中的位置与作用
+## 二、模块一：视觉输入
 
-### 2.1 RAG是什么
+### 2.1 颜色牌检测（YOLOv8n）
 
-**RAG = Retrieval-Augmented Generation（检索增强生成）**
-
-简单来说：**先检索，再生成**。不是让AI凭空编造，而是让它从知识库中找到相关信息，再基于这些信息生成回答。
-
-### 2.2 RAG在整体架构中的位置
+第一幕用户将物理颜色牌放置于桌面，摄像头俯拍检测类型和位置。
 
 ```
-用户选择（颜色+物象+人物+连接）
-           ↓
-      ┌────▼────┐
-      │ 视觉输入 │ ← 模块一：颜色牌检测 + 手势识别
-      └────┬────┘
-           ↓
-┌──────────▼──────────────────────────┐
-│           RAG 模块（二）             │ ← 核心：知识检索 + 内容生成
-│  ┌─────────┐    ┌──────────────┐    │
-│  │ 知识库   │──▶│   检索引擎      │    │
-│  │ 文化数据 │   │   精确+双向     │    │
-│  └─────────┘    └──────┬───────┘    │
-│                        ↓              │
-│                 ┌──────▼───────┐     │
-│                 │  阿里云百炼   │     │
-│                 │  qwen-turbo  │     │
-│                 └──────┬───────┘     │
-│                        ↓              │
-│                 ┌──────▼───────┐     │
-│                 │  实时侧输出   │─────┼──→ Unity（实时渲染）
-│                 │  高质量侧输出 │─────┼──→ 云端API（最终画作）
-│                 └──────────────┘     │
-└──────────────────────────────────────┘
-```
-
-### 2.3 RAG的两个输出层级
-
-| 输出层级 | 触发时机 | 输出内容 | 去向 |
-|---------|---------|---------|------|
-| **实时侧** | 每放置一个模块 | 元素描述、连接关系、节点颜色/样式 | → Unity即时显示 |
-| **高质量侧** | 点击确认后 | 完整文化上下文、多元素组合解读 | → 云端API生成最终画作 |
-
-### 2.4 RAG的核心价值
-
-| 传统生成 | RAG增强生成 |
-|---------|-------------|
-| AI凭空编造，可能胡编乱造 | 先检索知识库，确保内容准确 |
-| 泛泛而谈 | 结合湖大文化知识，言之有据 |
-| 统一叙事 | 根据用户选择组合，生成个性化内容 |
-
----
-
-## 三、模块一：颜色牌检测 + 手势识别
-
-### 3.1 颜色牌检测（YOLO）
-
-```
-摄像头俯拍桌面  →  YOLOv8n 检测  →  BoT-SORT 跟踪  →  颜色牌类型 / 位置 / track_id
+摄像头帧  →  YOLOv8n 推理  →  BoT-SORT 跟踪  →  类型 + 坐标 + track_id
 ```
 
 | 项目 | 内容 |
 |------|------|
-| **架构** | YOLO v8n + Ultralytics BoT-SORT |
-| **参数量** | ~3M |
-| **运行位置** | 本地（电脑端） |
-| **检测目标** | 6 类颜色牌：岳麓绿 / 书院红 / 西迁黄 / 湘江蓝 / 校徽金 / 墨色 |
-| **输出结果** | 类型 (class_id 0-5)、像素中心坐标、bbox、track_id、置信度 |
-| **实际状态** | 接口就绪 (`vision/color_card_detector.py`)，待采集数据训练模型 |
+| **检测目标** | 6 类：岳麓绿 / 书院红 / 西迁黄 / 湘江蓝 / 校徽金 / 墨色 |
+| **模型** | YOLOv8n (~3M 参数) + Ultralytics BoT-SORT |
+| **输出** | class_id (0-5)、像素中心坐标、bbox、track_id、置信度 |
+| **坐标映射** | 摄像头 640×480 → 线性映射 → Unity 1920×1080 |
+| **文件** | `vision/color_card_detector.py`（接口就绪，mock 模式可跑通，待采集数据训练） |
 
-#### 3.1.1 多目标跟踪（MOT）
+### 2.2 手势识别（MediaPipe）
 
-采用 Ultralytics 内置的 **BoT-SORT** 跟踪器：
-
-- **跨帧 ID 一致性**：同一张颜色牌在连续帧中保持相同 `track_id`
-- **放置/移除检测**：新 track_id 出现 = 颜色牌放上桌面；track_id 消失 = 移走
-- **降级**：`--no-track` 回退到逐帧 `model.predict()`，不生成 tracking ID
-
-#### 3.1.2 坐标映射
+全程手势驱动，MediaPipe 逐帧追踪手部 21 个关键点。
 
 ```
-摄像头像素坐标 (640×480)  →  线性映射  →  Unity 画布坐标 (1920×1080)
-```
-
-### 3.2 手势识别（MediaPipe）
-
-```
-摄像头视频帧  →  MediaPipe Hand Landmarker  →  21 个手部关键点 (x, y, z)
-                                              →  手势分类：食指伸出 / 握拳 / 张手
-                                              →  手势状态机 (5 模式 FSM)
+摄像头帧  →  MediaPipe Hand Landmarker  →  21 关键点 (x,y,z)
+                                          →  手势分类：食指伸出 / 握拳 / 张手
+                                          →  手势状态机 (5 模式)
 ```
 
 | 项目 | 内容 |
 |------|------|
 | **模型** | MediaPipe Hand Landmarker (Google) |
-| **输出** | 21 个归一化关键点 + 手势类型 + FSM 模式/子状态 |
 | **帧率** | 30fps（摄像头）/ 无上限（no-display 模式） |
-| **实际状态** | ✅ 已实现 (`vision/hand_detector.py`, `vision/hand_tracker.py`, `vision/gesture_state_machine.py`) |
+| **文件** | `vision/hand_detector.py`, `vision/hand_tracker.py`, `vision/gesture_state_machine.py` |
 
-**手势状态机 5 模式**：GLOBAL（握拳晕染/张手停止）→ DRAWING（食指绘画）→ CANDIDATE（悬停+握拳确认物象）→ CHAR_RECOMMEND（人物推荐确认）→ CHAR_WHEEL（轮盘浏览）
+### 2.3 手势状态机（5 模式 FSM）
 
----
+| 模式 | 子状态 | 触发手势 | 行为 |
+|------|--------|---------|------|
+| **GLOBAL** | IDLE | — | 全局空闲，检测握拳晕染/张手停止 |
+| **DRAWING** | TRACKING → COMPLETED / CANCELLED | 食指伸出→握拳提交/张手取消 | 追踪指尖轨迹 → 送入草图识别 |
+| **CANDIDATE** | BROWSING → CONFIRMED / CANCELLED | 悬停+握拳确认/张手取消 | Top-3 物象选择 |
+| **CHAR_RECOMMEND** | BROWSING → CONFIRMED / TO_WHEEL | 握拳确认/张手拒绝 | 人物推荐确认或进入轮盘 |
+| **CHAR_WHEEL** | SCROLLING → PREVIEWING → CONFIRMED / TO_RECOMMEND | 水平滑动+悬停+握拳 | 轮盘浏览选择人物 |
 
-## 四、模块二：AI 个性化叙事生成（RAG）
+### 2.4 草图识别（QuickDraw CNN）
 
-### 4.1 整体架构
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         RAG 模块                                 │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌─────────────┐     ┌─────────────┐     ┌─────────────────┐   │
-│  │  知识库     │────▶│  检索引擎      │────▶│  阿里云百炼     │   │
-│  │  (文化数据) │     │  (精确+双向)   │     │  (qwen-turbo)  │   │
-│  └─────────────┘     └─────────────┘     └────────────────┘    │
-│                                                   │             │
-│  ┌───────────────────────────────────────────────┴─────────┐   │
-│  │                      输出分层                          │   │
-│  ├──────────────────────┬───────────────────────────────┤   │
-│  │     实时侧           │        高质量侧               │   │
-│  │  (每放置一个模块)    │       (开始生成时)            │   │
-│  ├──────────────────────┼───────────────────────────────┤   │
-│  │  • 元素一句话描述     │  • 完整文化上下文              │   │
-│  │  • 连接关系类型      │  • 多元素组合解读              │   │
-│  │  • 节点颜色/样式    │  • 打包发送给云端API           │   │
-│  │  → Unity即时显示     │  → 云端生成图文叙事            │   │
-│  └──────────────────────┴───────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### 4.2 输入输出定义
-
-**输入（来自 Unity 或颜色牌检测）：**
-
-```python
-# 实时侧输入（每放置/连接一个模块）
-{
-    "event": "module_placed",      # module_placed / module_connected / generation_start
-    "module_id": "green_card",
-    "module_type": "color",        # color / object / character
-    "position": (320, 240),
-    "connections": [               # 当前模块的所有连接
-        {"to": "tree_01", "type": "color_grant"},
-    ],
-    "all_modules": [...]           # 当前所有已放置模块
-}
-
-# 高质量侧输入（开始生成时）
-{
-    "event": "generation_start",
-    "all_modules": [...],
-    "all_connections": [...]
-}
-```
-
-**实时侧输出（Python → Unity）：**
-
-```python
-{
-    "module_id": "green_card",
-    "entity": "岳麓绿",
-    "description": "这是一种生命的颜色，代表着千年不息的传承。",
-    "connections": [
-        {"to": "tree_01", "type": "color_grant", "style": "绿色光线"}
-    ],
-    "unity_data": {
-        "node_color": "#2E7D32",
-        "line_color": "#FFD700",
-        "line_style": "dashed"
-    }
-}
-```
-
-**高质量侧输出（Python → 云端API）：**
-
-```python
-{
-    "api_payload": {
-        "modules": [
-            {"entity": "岳麓绿", "description": "...", "context": "..."},
-            {"entity": "书院", "description": "...", "context": "..."},
-            {"entity": "张栻", "description": "...", "context": "..."},
-        ],
-        "combinations": [...],
-        "character_spirit": "传道济民",
-        "prompt_template": "根据以下元素生成个性化叙事..."
-    }
-}
-```
-
-### 4.3 知识库结构
+第二幕用户食指绘画，轨迹栅格化后经 CNN 分类为物象。
 
 ```
-rag/knowledge/
-├── 颜色实体定义.txt             # 原始数据（23条）
-├── 物象典故.txt                 # 原始数据（88条）
-├── 人物故事.txt                 # 原始数据（160条）
-├── 组合解读.txt                 # 原始数据（100组）
-├── 叙事模板.txt                 # 原始数据（100句）
-├── entities/                    # 实体 JSON
-│   ├── colors.json            # 23 个颜色实体
-│   ├── objects.json           # 88 个物象实体
-│   └── characters.json        # 97 个人物实体
-├── combinations/               # 组合解读 JSON（107条）
-│   ├── 岳麓绿_岳麓书院.json    # 文件名即查询 key
-│   ├── 湖湘红_湘江.json
-│   └── ...
-└── templates/                 # 叙事模板 JSON
-    └── narrative.json         # 开头/场景/人物/结尾 4 类共 100 句
-```
-
-| 项目 | 状态 |
-|------|------|
-| 知识库目录结构 | ✅ 已建立 |
-| 颜色实体定义 | ✅ 23 条（2026-05-06） |
-| 物象典故 | ✅ 88 条（2026-05-06） |
-| 人物故事 | ✅ 97 条（2026-05-06） |
-| 组合解读 | ✅ 107 条（2026-05-06） |
-| 叙事模板 | ✅ 100 句（2026-05-06） |
-| 构建工具 | ✅ `rag/build_knowledge.py`（txt→json 自动化） |
-| **总实体数** | **208**（23+88+97） |
-| RAG 加载验证 | ✅ `kb.get_entity('岳麓绿')` → "岳麓书院千年古木" |
-
-**数据格式**：
-- **颜色**: `type, description, color(hex), symbolism, related_entities, mood, era, theme`
-- **物象**: `type, description, symbolism, related_entities, historical_context`
-- **人物**: `type, name, years, title, description, spirit, related_entities, quotes, stories`
-- **组合**: `entity1, entity2, meaning, interpretation`（文件名 = `{e1}_{e2}.json`，检索直接命中）
-- **模板**: 4 类场景句子数组（开头 30 + 场景 30 + 人物 20 + 结尾 20）
-
----
-
-## 五、模块三：多模态内容生成与呈现
-
-```
-RAG叙事文本  →  阿里云百炼  →  多模态故事包  →  Unity 呈现
-```
-
-| 项目 | 内容 | 状态 |
-|------|------|------|
-| **文本生成** | 阿里云百炼（RAG检索增强） | ✅ 已实现 |
-| **实时文本** | qwen-turbo（快速响应） | ✅ 已实现 |
-| **叙事卡文本** | qwen-plus（高质量生成） | ✅ 已实现 |
-| **视觉生成** | wanx-v1（万象，云端生成） | ✅ 已实现 |
-| **输出** | 叙事卡、明信片图片 | ✅ 已实现（postcard.py） |
-
-**已接入功能**：
-
-| 函数 | 说明 |
-|------|------|
-| `generate_realtime_description()` | 实时生成单模块描述（qwen-turbo） |
-| `generate_connection_description()` | 生成连接关系描述（qwen-turbo） |
-| `generate_narrative()` | 生成完整叙事卡（qwen-plus） |
-| `generate_image_prompt()` | 生成画作提示词（qwen-turbo / 降级模板） |
-| `generate_image()` | 调用万象 wanx-v1 生成图像 |
-| `create_postcard()` | 生成明信片/叙事卡图片（动态布局） |
-| `to_json()` | 输出完整叙事卡数据（含Base64图像） |
-
-**使用方式**：
-
-```python
-from rag.generator import create_generator, create_config
-
-# 配置API Key（通过环境变量 DASHSCOPE_API_KEY）
-config = create_config(api_key="your-key")
-generator = create_generator(config)
-
-# 实时文本生成
-desc = generator.generate_realtime_description("岳麓绿", context)
-
-# 叙事卡生成
-narrative = generator.generate_complete_narrative(context)
-```
-
----
-
-## 六、模块四：Unity 实时渲染与交互呈现
-
-| 输入数据 | 输出效果 |
-|---------|---------|
-| 模块位置+ID（实时） | 场景中模块的虚拟对应物 |
-| 模块触摸状态（实时） | 即时光影反馈、元素生长动画 |
-| 个性化叙事文本 | 四幕叙事旁白、最终精神画像 |
-
-| 项目 | 状态 |
-|------|------|
-| Python→Unity通信 | ⚠️ 部分实现 (`unity_bridge/sender.py`) |
-| Unity→Python通信 | ⚠️ 部分实现 (`unity_bridge/server.py`) |
-| 手势数据发送 | ⚠️ 部分实现 (`unity_bridge/hand_server.py`) |
-| Unity工程 | ❌ 未实现（单独管理） |
-
----
-
-## 七、生图提示词转换逻辑
-
-### 7.1 方案三：LLM归因（已实现）
-
-```
-用户组合（颜色+物象+人物+连接）
+食指指尖轨迹 (landmark 8 点序列)
        ↓
-   LLM 阅读理解（qwen-turbo）
+轨迹归一化 → 栅格化 28×28 灰度图（笔画宽度 2px，抗锯齿）
        ↓
-   生成完整生图提示词
+CNN 推理：QuickDraw MobileNet（82 类，ONNX 本地推理）
+  · 降级方案：HeuristicPredictor（9 种几何特征，模型不可用时自动切换）
        ↓
-   发送到云端 API（阿里云百炼 wanx-v1 万象）
+QuickDraw 类别 → 88 物象映射表
+       ↓
+颜色上下文加权（第一幕颜色对候选物象加权/降权）
+       ↓
+Top-3 候选物象 → Unity
 ```
-
-### 7.2 实现代码
-
-```python
-def generate_prompt(user_input):
-    prompt = f"""根据以下湖大千年色组合，生成一幅 Stable Diffusion 画作描述：
-
-颜色：{user_input['colors']}
-物象：{user_input['objects']}
-人物：{user_input['characters']}
-连接：{user_input['connections']}
-
-要求：
-- 风格：穿越感，水墨画 + 老照片实景混合
-- 人物：保留两个人影，远距离呈现
-- 底图：颜色晕染成水墨背景
-- 叙事元素融入画面
-
-输出：一段英文提示词，200词以内，用于 text-to-image 生成"""
-
-    response = ollama.chat(model="llama3", messages=[
-        {"role": "user", "content": prompt}
-    ])
-    return response['message']['content']
-```
-
-### 7.3 失败处理
-
-- LLM 输出不稳定 → 降级到模板填充（方案一）
-- 云端 API 超时 → 返回"画作生成中，请稍候"
-
-| 项目 | 状态 |
-|------|------|
-| LLM归因逻辑 | ✅ 已实现 |
-| 失败降级处理 | ✅ 已实现 |
-
----
-
-## 八、技术实现状态总览
-
-| 模块 | 子模块 | 状态 |
-|------|--------|------|
-| **模块一** | YOLO 颜色牌检测 | 接口就绪（待训练） |
-| | MOT 多目标跟踪 | ✅ 已实现（BoT-SORT） |
-| | 摄像头连接 | ✅ 已实现 |
-| | 手部检测 | ✅ 已实现 |
-| | 手势状态机 | ✅ 已实现（5 模式 FSM） |
-| | 区域标定 | ✅ 已实现 |
-| **模块二** | 检索引擎(精确+双向) | ✅ 已实现 |
-| | 生成模块(阿里云百炼) | ✅ 已接入 |
-| | 知识库内容 | ✅ 已构建（208实体+107组合+100模板） |
-| | 输入输出定义 | ✅ 已实现（RAGSystem 全部接口） |
-| | 连接图分析+模板融合 | ✅ 已实现（`_analyze_connections` + `_pick_templates`） |
-| | 人物推荐引擎 | ✅ 已实现（54核心人物，四维打分） |
-| **模块三** | 文本生成(实时) | ✅ 已实现 |
-| | 叙事卡生成 | ✅ 已实现 |
-| | 视觉生成 | ✅ 已实现（wanx-v1 万象） |
-| | 云端API | ✅ 已接入 |
-| | **明信片合成** | ✅ 已实现（postcard.py 重写布局引擎） |
-| **模块四** | Unity通信 | ✅ sender.py 统一发送器 + C# 消息路由 |
-| | 手势数据发送 | ✅ UnitySender.send_hand_data() |
-| | Unity工程 | ✅ 端到端集成测试通过（Phase 5/5 除轮盘外完成，物象/人物卡片/手势状态 UI + 手部实时可视化已就绪） |
-| **生图转换** | 生成图像提示词 | ✅ 已实现 |
-
----
-
-## 九、完成度评估
-
-### 按子模块统计
-
-| 模块 | 总项 | ✅ | ⚠️ | ❌ | 完成度 |
-|------|------|----|----|----|--------|
-| 模块一：颜色牌检测 + 手势识别 | 6 | 5 | 1 | 0 | **83%** |
-| 模块二：RAG 检索与生成 | 6 | 6 | 0 | 0 | **100%** |
-| 模块三：多模态内容生成 | 5 | 5 | 0 | 0 | **100%** |
-| 模块四：Unity 渲染交互 | 3 | 3 | 0 | 0 | **100%** |
-| 生图提示词转换 | 1 | 1 | 0 | 0 | **100%** |
-| **总计** | **21** | **20** | **1** | **0** | **~95%** |
-
-> 模块二说明：检索采用精确匹配+双向查找（BM25 模糊检索为 P2 搁置，非必需）。输入输出接口全部实现（`RAGSystem` 类）。连接图分析（`_analyze_connections`）、模板+LLM融合叙事、明信片端到端管道均已可用。模块二已基本完成。
->
-> 模块四说明：2026-05-10 完成端到端集成测试，test_integrated.py 串联摄像头→手部跟踪→手势状态机→草图识别→人物推荐→Unity 双端口通信全链路。物象/人物卡片 UI、手势状态指示器、手部骨架实时可视化均已就绪。
-
-### 按可运行能力评估
-
-| 能力 | 状态 |
-|------|------|
-| 摄像头 → YOLO 颜色牌检测（mock → 待训练上线） | 接口就绪 |
-| 颜色牌检测 → Unity 消息推送 | ✅ 端到端可跑（mock 模式） |
-| 摄像头 → MediaPipe 手部 → FSM → 桥接 → Unity | ✅ 端到端联调通过 |
-| 检索上下文 → 叙事生成 → 图像生成 → 明信片合成 | ✅ 端到端可跑 |
-| Python 端 → Unity 实时渲染 | ✅ 手势→识别→候选卡片+手部实时可视化 |
-| QuickDraw 模型训练 | ✅ 82 类训练完成，val acc 83.8%，ONNX 已导出 |
-
-**核心 AI 管线 ~97%，Unity 交互层 ~100%（端到端联调通过），整体 ~95%。**
-
----
-
-## 十、明信片图文生成 —— 问题跟踪
-
-### ✅ 已解决
-
-#### 问题 1：损坏的导入语句（已修复 2026-05-06）
-
-**修复**：`rag/__init__.py` 中 `CloudGenerator` 改为 `AliCloudGenerator`。
-
-#### 问题 2：明信片与 RAG 系统集成管道（已实现 2026-05-06）
-
-`RAGSystem.generate_postcard()` 已串联文本叙事→图像生成→明信片合成三步。
-
-#### 问题 3：字体自动适配（已实现 2026-05-06）
-
-`FontManager` 已改为自动扫描：项目 `assets/fonts/` → `C:\Windows\Fonts` → 兜底。当前运行字体：`simhei.ttf`。
-
-#### 问题 4：知识库内容（已构建 2026-05-06）
-
-208 实体 + 107 组合 + 100 模板，详见 §4.3。
-
----
-
-### 🐛 集成测试期间发现的 Bug（2026-05-06）
-
-#### Bug 1：文本生成输出为空
-
-**原因**：`result_format='message'` 时内容在 `choices[0].message.content`，代码读的是 `output.text`。
-
-**修复** (`rag/generator.py:85`)：优先取 `choices[0].message.content`。
-
-#### Bug 2：图像模型名错误
-
-**原因**：`qwen-image-2.0-pro` 不存在。
-
-**修复** (`rag/generator.py:34`)：改为 `wanx-v1`，支持 `prompt_extend` 和 `negative_prompt`。
-
-#### Bug 3：明信片排版严重错乱
-
-| 子问题 | 根因 | 修复 |
-|--------|------|------|
-| 图片不可见 | 文字占满画布，图片仅剩 106px 被跳过 | 图片放标题下方，500px 优先区 |
-| 文字不换行 | PIL `draw.text` 不处理 `\n` | `textbbox` 按像素宽度逐字换行 |
-| 画布不足 | 固定 1440px | 预计算动态高度 |
-| 行间距失效 | 一段多行只加一个 line_spacing | 每行独立绘制 |
-
-**修复** (`rag/postcard.py`)：完全重写布局引擎，布局顺序为 标题 → AI 水墨画（装裱）→ 正文（自动换行）→ 落款印章。
-
----
-
-#### Bug 4：API Key 未传递到生成器（已修复 2026-05-06）
-
-**原因**：`create_generator()` 无参调用时创建空 `GenerationConfig()`，不读环境变量。`generate_image()` 也直读 `self.config.api_key` 不降级到 env。
-
-**修复**：
-- `create_generator()`：无 config 时调用 `create_config()` 自动读 env
-- `generate_image()`：`api_key = self.config.api_key or os.environ.get("DASHSCOPE_API_KEY", "")`
-
-#### ✅ 端到端测试通过（2026-05-06）
-
-`RAGSystem.generate_postcard()` 全流程跑通：
-
-| 阶段 | 结果 |
-|------|------|
-| 知识库加载 | 208实体 + 107组合 + 100模板 |
-| 模块注册 | m1=岳麓绿(color), m2=岳麓书院(object), m3=朱熹(character) |
-| 连接检索 | m1↔m2: color_grant "学术传承", m2↔m3: scene_entry |
-| 叙事生成 | 5段完整叙事，模板+LLM融合 |
-| 图像生成 | wanx-v1 生成成功 |
-| 明信片合成 | 动态布局 → `output/postcard.png` (~1MB) |
-
----
-
-### ⚠️ 待处理
-
-| 优先级 | 问题 | 说明 |
-|--------|------|------|
-| P1 | 字体 zip 解压 | `assets/fonts/SourceHanSansSC.zip` 解压后优先使用思源字体 |
-| P2 | 多场景覆盖测试 | 测试不同模块组合的生成效果 |
-| P2 | BM25/模糊检索 | 当前精确匹配，缺模糊检索能力 |
-
----
-
-## 十一、交互变更带来的新开发任务（2026-05-09）
-
-交互文档 `proposal/interaction.md` 进行了以下核心变更：
-- **第二幕**：物理物象块 → 手势绘画 + 草图识别
-- **第三幕**：物理人物块 → 智能推荐（方案A）+ 轮盘自选（方案B）
-
-以下是由此产生的新开发模块和需扩展的现有模块。
-
----
-
-### 11.1 新增模块总览
-
-| 模块 | 文件（建议） | 类型 | 说明 |
-|------|-------------|------|------|
-| **草图识别** | `vision/sketch_recognizer.py` | 新增 | 指尖轨迹栅格化 → CNN 分类 → 物象映射 |
-| **人物推荐引擎** | `rag/character_recommend.py` | ✅ 已实现 | 四维打分（参考表+同组+关键词+基础）→ Top-3 推荐 |
-| **人物轮盘** | `vision/character_wheel.py` | 新增 | 5组人物横向滚动 + 手势控制 |
-| **手势状态机** | `vision/gesture_state_machine.py` | 扩展 `gesture_connection.py` | 多模式状态管理（绘画/候选选择/人物推荐/人物轮盘） |
-| **QuickDraw 模型训练** | `vision/quickdraw/` | ✅ 已就绪 | 下载93类.npy数据 → 训练CNN → 导出ONNX |
-
----
-
-### 11.2 模块一：草图识别（`vision/sketch_recognizer.py`）
-
-**输入**：MediaPipe 食指指尖轨迹（`List[(x, y, t)]`）
-**输出**：Top-3 物象候选（`List[(entity_name, confidence)]`）
-
-**管线**：
-
-```
-指尖轨迹（landmark 8 点序列）
-       ↓
-轨迹归一化：平移到原点，缩放到 28×28 画布
-       ↓
-轨迹栅格化：28×28 单通道灰度图，笔画宽度 2px，抗锯齿
-       ↓
-CNN 推理：自训练 QuickDraw CNN（93 类）
-  • 模型加载：ONNX（vision/models/quickdraw_mobilenet.onnx）
-  • 降级方案：HeuristicPredictor（几何特征分类，模型不可用时自动切换）
-       ↓
-QuickDraw → 88 物象映射表（一级映射）
-  • 例：{"river": ["湘江", "流水", "湖面"], "tree": ["古树", "竹林", "林荫道"], ...}
-  • 一个 QuickDraw 类可映射多个物象
-       ↓
-颜色上下文加权（二级排序）
-  • 输入：第一幕选择的颜色
-  • 加权规则：见 interaction.md §2.2.3 的加权表
-       ↓
-Top-3 候选物象 [(name, score), ...]
-```
-
-**QuickDraw 模型训练模块**（`vision/quickdraw/`）：
-
-| 文件 | 说明 |
-|------|------|
-| `config.py` | 82 个 QuickDraw 类别列表（经官方 categories.txt 校准）、超参数、路径配置 |
-| `download_data.py` | 并发下载（默认 8 线程），从 GCS 下载 `.npy` 位图文件，支持 `--retry` 重试失败 |
-| `model.py` | 2层 CNN：Conv→BN→ReLU→MaxPool ×2 → FC→Dropout ×2 → logits |
-| `dataset.py` | PyTorch Dataset，自动划分 train/val（85/15），每类取前 15K 样本 |
-| `train.py` | 训练入口：AdamW + CosineAnnealing → 导出 ONNX，支持 `--resume` 断点续训 |
-
-**断点续训**：
-```bash
-python -m vision.quickdraw.train --resume    # 从上次中断点继续
-python -m vision.quickdraw.train --export-only  # 仅从 checkpoint 导出 ONNX
-```
-每个 epoch 保存最佳模型到 `checkpoint.pth`，包含 optimizer state、epoch、best_acc。
-
-训练流程：
-```bash
-python -m vision.quickdraw.download_data   # 1. 下载数据（82类，~8.5GB, 10-20min）
-python -m vision.quickdraw.train           # 2. 训练 + 导出 ONNX（GPU 1-2h / CPU 4-6h）
-```
-输出文件：
-- `vision/models/quickdraw_mobilenet.onnx` — 供 `sketch_recognizer.py` 加载
-- `vision/models/quickdraw_classes.json` — 类别索引映射
-- `vision/quickdraw/checkpoint.pth` — 断点文件，用于恢复训练
-
-**模型规格**：
 
 | 属性 | 值 |
 |------|-----|
-| 架构 | 2层CNN（Conv 5×5, 32→64 通道） + 2层FC（512→128） + 输出层 |
-| 输入 | `(B, 1, 28, 28)` float32 灰度图 |
-| 输出 | `(B, 82)` logits |
-| 参数量 | ~635K |
-| 训练数据 | Google QuickDraw .npy 位图，82 类 × 15K 样本/类 ≈ 1.2M |
-| 数据增强 | 无（.npy 数据已含天然笔触变异，足够覆盖手势绘画差异） |
-
-**类别校准**：原始 93 类中有 16 个不在 QuickDraw 官方 345 类别中，已移除并将对应物象重新分配到最近的有效类别。最终 82 类全覆盖 88 物象。
-
-**需要开发的子任务**：
-
-| 任务 | 说明 | 优先级 | 状态 |
-|------|------|--------|------|
-| 轨迹归一化 + 栅格化 | 点序列 → 28×28 灰度图，含抗锯齿笔画渲染 | P0 | ✅ |
-| QuickDraw 数据下载 | 82 类 .npy 位图，~8.5GB | P0 | ✅ |
-| QuickDraw 模型训练 | 自训练 CNN → ONNX 本地推理，含断点续训 | P0 | ✅ |
-| 类别映射表 | QuickDraw 82 类英文名 → 88 物象中文名映射 | P0 | ✅ |
-| 颜色加权算法 | 根据第一幕颜色对映射后候选排序 | P1 | ✅ |
-| 几何特征降级 | HeuristicPredictor：9 种几何分支，模型不可用时自动降级 | P0 | ✅ |
-
-**训练结果**（2026-05-09）：
-
-| 指标 | 值 |
-|------|-----|
-| 最终验证准确率 | **83.8%** |
-| 训练时间 | ~10 分钟（RTX 4060 Laptop GPU, 15 epochs） |
-| ONNX 模型大小 | 2.5MB |
-| 训练集 | 1,045,500 样本（82 类 × ~12.7K） |
-| 验证集 | 184,500 样本 |
-| 参数量 | 653,234 |
-
-收敛过程：
-```
-Epoch  1: val acc 77.8%
-Epoch  5: val acc 82.1%
-Epoch 10: val acc 83.5%
-Epoch 15: val acc 83.8%  ← 最佳
-```
-
-**QuickDraw 数据来源**：
-- [Google Quick, Draw! Dataset](https://github.com/googlecreativelab/quickdraw-dataset)（5000 万张草图，345 类）
-- 28×28 灰度位图 `.npy` 格式，HTTP 直接下载
-- 本项目选取其中 82 个与 88 物象有映射关系的类别（经官方 categories.txt 校验）
-- 不支持类别（16个）：waterfall, tower, window, road, bookshelf, pen, paper, newspaper, blackboard, plate, boat, flag, trophy, medal, magnifying glass, baseball cap
+| 架构 | 2层CNN（Conv 5×5, 32→64）+ 2层FC（512→128）+ 输出层 |
+| 输入/输出 | `(1,28,28)` → `(82,)` logits |
+| 参数量 | ~635K，ONNX 2.5MB |
+| 验证准确率 | **83.8%**（82 类，RTX 4060 训练 ~10 分钟） |
+| 文件 | `vision/sketch_recognizer.py`, `vision/quickdraw/` |
 
 ---
 
-### 11.3 模块二：人物推荐引擎（`rag/character_recommend.py`）✅ 已实现
+## 三、模块二：RAG 检索增强生成
 
-**输入**：第一幕颜色 + 第二幕所有已选物象 + 已选人物列表
-**输出**：Top-3 推荐人物 `[RecommendResult(name, title, score, reason), ...]`
+**RAG = Retrieval-Augmented Generation**：先从知识库检索相关文化内容，再交由 LLM 基于检索结果生成，确保准确性和个性化。
 
-**管线**：
+```
+用户选择（颜色 + 物象 + 人物 + 连接）
+       ↓
+┌──────────────────────────────────────────────┐
+│  知识库（208 实体 + 107 组合 + 100 模板）      │
+│       ↓                                       │
+│  检索引擎（精确匹配 + 双向查找）                │
+│       ↓                                       │
+│  阿里云百炼（qwen-turbo / qwen-plus）          │
+│       ↓                                       │
+│  输出分层：                                    │
+│    实时侧 → Unity 即时显示（元素描述、连接关系） │
+│    高质量侧 → 云端 API 生成最终画作             │
+└──────────────────────────────────────────────┘
+```
+
+### 3.1 知识库
+
+| 类别 | 数量 | 格式 |
+|------|------|------|
+| 颜色实体 | 23 条 | `type, description, color(hex), symbolism, related_entities, mood, era, theme` |
+| 物象典故 | 88 条 | `type, description, symbolism, related_entities, historical_context` |
+| 人物故事 | 97 条 | `type, name, years, title, description, spirit, related_entities, quotes, stories` |
+| 组合解读 | 107 条 | `entity1, entity2, meaning, interpretation`（文件名即查询 key） |
+| 叙事模板 | 100 句 | 开头30 + 场景30 + 人物20 + 结尾20 |
+
+> 构建工具：`rag/build_knowledge.py`（txt → json 自动化）
+
+### 3.2 检索引擎
+
+精确匹配 + 双向查找，从知识库检索颜色、物象、人物、组合解读、叙事模板。BM25 模糊检索标记为 P2（非必需）。
+
+### 3.3 LLM 生成
+
+| 函数 | 模型 | 说明 |
+|------|------|------|
+| `generate_realtime_description()` | qwen-turbo | 实时单模块描述 |
+| `generate_connection_description()` | qwen-turbo | 连接关系描述 |
+| `generate_narrative()` | qwen-plus | 完整叙事卡（模板+LLM融合） |
+| `generate_image_prompt()` | qwen-turbo | 画作提示词（失败降级模板） |
+| `generate_image()` | wanx-v1 | 云端生成水墨画 |
+| `create_postcard()` | — | 明信片合成（PIL 动态布局） |
+
+**失败处理**：LLM 不稳定 → 降级模板填充；云端 API 超时 → "画作生成中，请稍候"
+
+### 3.4 人物推荐引擎
 
 ```
 颜色 + 物象 + 已选人物
        ↓
-四维打分（纯本地，无依赖）
-  (1) 内置参考表命中  (0~0.50) : 已知颜色+物象→人物映射（与 interaction.md 推荐示例表一致）
-  (2) 已选人物同组加权 (0~0.20) : 同理学脉/湘军/维新/现代学人 group 加权
-  (3) 关键词文本匹配  (0~0.25) : 颜色关键词 + 物象名在人物 title/spirit/description 中的命中
-  (4) 实体基础分      (0~0.05) : description 长度、title 存在性
+四维打分（纯本地，无依赖）：
+  (1) 内置参考表命中 (0~0.50)
+  (2) 已选人物同组加权 (0~0.20)
+  (3) 关键词文本匹配 (0~0.25)
+  (4) 实体基础分 (0~0.05)
        ↓
-降序排序 → Top-15 候选
-       ↓
-[可选] LLM 精选（qwen-turbo）
-  • prompt：给定颜色 X、物象 Y、已选人物 Z，从15候选精选3位
-  • 降级：LLM 不可用时直接返回启发式 Top-3
-       ↓
-Top-3 推荐人物 + 推荐理由
+降序 → Top-15 → [可选] LLM 精选 → Top-3 推荐
 ```
 
-**数据来源**：
-- 54 个核心人物嵌入在 `CORE_CHARACTERS` 列表中（6 组：理学脉络12/湘军将帅4/维新革命6/现代学人12/校园角色13/抽象意象9）
-- 原因：`build_knowledge.py` 的 TXT 解析器存在格式缺陷，历史人物名大量丢失，改为手动维护精确列表
-- 颜色→物象→人物参考表与 `interaction.md` §第三幕推荐示例完全一致
-
-**核心类/接口**：
-
-| 类/函数 | 说明 |
-|---------|------|
-| `CharacterRecommender` | 推荐引擎主类 |
-| `recommend(color, objects, selected, use_llm)` | 主接口，返回 `List[RecommendResult]` |
-| `_score_one(name, data, color, objects, selected)` | 单人物四维打分 |
-| `_llm_rerank(candidates, ...)` | LLM 二次精选（可选，需 dashscope API） |
-| `create_character_recommender(knowledge_path, api_key)` | 工厂函数 |
-| `CHARACTER_GROUPS` | 6 组人物分组字典 |
-| `COLOR_TO_SPIRIT_KEYWORDS` | 6 色 → 精神关键词表 |
-
-**实现状态**：
-
-| 子任务 | 状态 | 说明 |
-|--------|------|------|
-| 内置参考表 | ✅ 已实现 | 6色 × 多种物象 → 推荐人物，与交互文档一致 |
-| 已选人物同组加权 | ✅ 已实现 | CHARACTER_GROUPS 6组覆盖全部核心人物 |
-| 关键词文本匹配 | ✅ 已实现 | 颜色关键词 + 物象名双通道命中 |
-| LLM 排序 prompt | ✅ 已实现 | 可选启用，失败自动降级到启发式 |
-| 已选人物排除 | ✅ 已实现 | 推荐结果自动过滤已选人物 |
-
----
-
-### 11.4 模块三：人物轮盘（`vision/character_wheel.py`）
-
-**输入**：160 人物数据 + 手势输入（滑动/悬停/握拳/张手）
-**输出**：选中的人物 entity_name
-
-**数据结构**：
-
-```
-5 组人物：
-  ├── 古代先贤（~30人，墨金色 #C5A35A）
-  │     朱熹、张栻、王夫之、周敦颐、程颢、程颐……
-  ├── 近代湖湘（~25人，赭红色 #9B3A3A）
-  │     曾国藩、左宗棠、胡林翼、谭嗣同、魏源、黄兴……
-  ├── 现代学人（~30人，藏蓝色 #2C3E6B）
-  │     毛泽东、杨昌济、李达、成仿吾、熊十力、冯友兰……
-  ├── 校园角色（~55人，青绿色 #3A7D5A）
-  │     学子、教师、研究者、志愿者、讲解员、图书管理员……
-  └── 抽象意象（~20人，月白色 #D5D5C8）
-        理学之魂、书院守望者、文化摆渡人、知识火种者……
-```
-
-**轮盘交互逻辑**：
-
-```
-手势水平位移 Δx → 滚动速度 = f(Δx)
-       ↓
-当前组内卡片横向滚动
-       ↓
-手静止 > 1s 且手掌在某卡片区域 → 卡片放大 + 显示简介
-       ↓
-握拳 → 选中当前高亮卡片
-       ↓
-张手 → 退出轮盘，回到推荐阶段
-```
-
-**需要开发的子任务**：
-
-| 任务 | 说明 | 优先级 |
-|------|------|--------|
-| 人物分组数据 | 160 人物分 5 组，每组含 name + title + description + color JSON | P0 |
-| 横向滚动逻辑 | 卡片池渲染、惯性滚动、边界回弹 | P0 |
-| 滑动速度映射 | 手势水平位移增量 → 轮盘滚动速度的非线性映射 | P0 |
-| 悬停检测 + 计时 | 手静止区域判断 + 1s 计时器 → 卡片放大 | P1 |
-| 分组切换 | 手势上/下滑切换人物分组 | P1 |
-
-> **注意**：轮盘的**渲染**由 Unity 前端负责，本模块只输出轮盘**逻辑状态**（当前组、当前高亮卡片、滚动偏移、选中事件），通过 `unity_bridge` 发送给 Unity。
-
----
-
-### 11.5 模块四：手势状态机扩展（扩展现有 `vision/gesture_connection.py`）
-
-当前 `GestureConnection` 只有一套状态机（IDLE / HOVERING / CONNECTING / COMPLETING），需要扩展为**多模式状态机**：
-
-```
-顶层模式（Mode）：
-  ├── GLOBAL        ← 全局模式（握拳晕染、张手停止，已有）
-  ├── DRAWING       ← 绘画模式（第二幕，新增）
-  ├── CANDIDATE     ← 候选物象确认（第二幕，新增）
-  ├── CHARACTER_RECOMMEND  ← 人物推荐确认（第三幕阶段一，新增）
-  └── CHARACTER_WHEEL      ← 人物轮盘浏览（第三幕阶段二，新增）
-```
-
-**各模式内的子状态**：
-
-| 模式 | 子状态 | 触发手势 | 行为 |
-|------|--------|---------|------|
-| DRAWING | TRACKING | 食指伸出 | 追踪指尖轨迹 |
-| DRAWING | COMPLETED | 握拳 | 轨迹定型 → 送入草图识别 |
-| DRAWING | CANCELLED | 张手 | 清空轨迹 |
-| CANDIDATE | BROWSING | 手悬停候选卡片上 | 高亮对应卡片 |
-| CANDIDATE | CONFIRMED | 握拳 | 确认选中物象 |
-| CANDIDATE | CANCELLED | 张手 | 回到 DRAWING |
-| CHAR_RECOMMEND | BROWSING | 手悬停推荐卡片上 | 高亮 + 简介 |
-| CHAR_RECOMMEND | CONFIRMED | 握拳 | 确认选中人物 |
-| CHAR_RECOMMEND | TO_WHEEL | 张手 | 切换到 CHAR_WHEEL |
-| CHAR_WHEEL | SCROLLING | 手水平移动 | 轮盘滚动 |
-| CHAR_WHEEL | PREVIEWING | 悬停 > 1s | 卡片放大 + 简介 |
-| CHAR_WHEEL | CONFIRMED | 握拳 | 确认选中人物 |
-| CHAR_WHEEL | TO_RECOMMEND | 张手 | 回到 CHAR_RECOMMEND |
-
-**需要开发的子任务**：
-
-| 任务 | 说明 | 优先级 | 状态 |
-|------|------|--------|------|
-| 多模式状态机基类 | Mode + SubState 二级状态管理 | P0 | ✅ |
-| 食指伸出检测 | `_recognize_index_pointing()`：仅食指伸展（landmark 8 tip < mcp），其余握起 | P0 | ✅ |
-| 绘画模式 | 轨迹录制 `List[(x,y,t)]`、握拳结束、张手清空 | P0 | ✅ |
-| 水平位移检测 | 连续帧手掌 x 坐标差值 → 轮盘滚动速度映射 | P1 | ⏸️ 暂缓 |
-| 静止计时器 | 手掌在卡片区域内静止 > 1s 触发悬停预览 | P1 | ✅ |
-
----
-
-### 11.6 已有模块需适配的变更
-
-| 模块 | 文件 | 变更内容 |
-|------|------|---------|
-| **RAG 检索** | `rag/knowledge_base.py` | 新增 `search_characters_by_color_object(color, objects)` 人物推荐检索接口 |
-| **Unity Bridge** | `unity_bridge/` | ✅ 新增消息类型已定义（sender.py + DataTypes.cs + PythonConnection.cs 路由） |
-| **手势状态机** | `vision/gesture_state_machine.py` | ✅ 5 模式 FSM 已实现，食指伸出检测+轨迹录制+状态回调 |
-
----
-
-### 11.7 Unity Bridge 打通方案
-
-**Unity 项目路径**：`D:\unity projects\ohhh-display`
-
-#### 11.7.1 当前通信架构
-
-```
-Python 端                              Unity 端
-─────────                              ────────
-unity_bridge/server.py  :8888  ←→  TCP Client (C#)
-  ├── module_placed  → Unity          接收描述、颜色、连线样式
-  ├── connection_created → Unity
-  └── generation_result → Unity
-
-unity_bridge/hand_server.py :8889  →  TCP Client (C#)
-  └── hand_tracking (每帧)
-
-unity_bridge/sender.py  ✅ 已实现（Phase 1, 2026-05-10）
-  ├── UnitySender 类：双端口(:8888 + :8889)，自动重连
-  ├── send_object_candidates / send_character_candidates / send_wheel_state
-  ├── send_gesture_state / send_hand_data
-  └── send_raw（失败自动重连重试）
-```
-
-Unity C# 端同步更新（Phase 1, 2026-05-10）：
-- `DataTypes.cs`：新增 12 个数据类型（ObjectCandidatesData, CharacterCandidatesData, WheelStateData, GestureStateData, BaseMessage 等），补全 ConnectionType 枚举（6 种），新增 InteractionMode 枚举
-- `PythonConnection.cs`：重写消息路由为 `type` 字段 switch 分发，新增 5 个事件 + 5 个发送方法
-
-#### 11.7.2 实现顺序
-
-| 阶段 | 内容 | 说明 | 状态 |
-|------|------|------|------|
-| **一** | `sender.py` 统一发送器 | 封装 TCP 发送逻辑，支持重连、多端口。所有 Python→Unity 推送统一入口 | ✅ |
-| **二** | Act 2 物象候选 | 新增 `object_candidates` (Py→Unity) + `object_selected` (Unity→Py) | ✅ |
-| **三** | Act 3 人物推荐 | 新增 `character_candidates` + `character_selected` 消息 | ✅ |
-| **四** | Act 3 人物轮盘 | 新增 `wheel_state` + `wheel_selected` 消息 | ⏸️ 暂缓 |
-| **五** | 手势状态机接驳 | `gesture_connection.py` 多模式状态机回调 → `UnitySender` | ✅ |
-
-#### 11.7.2.1 Phase 2 实现详情（2026-05-10）
-
-**Python 端**：
-- `server.py`：新增 `handle_object_selected()`、`handle_character_selected()`、`handle_wheel_*` 处理函数，process_message 同步兼容 `event` 和 `type` 两种字段名
-- `sketch_bridge.py`（新建）：`SketchBridge` 类，连接 `SketchRecognizer` + `UnitySender`，提供 `add_point()` → `commit()` → 自动识别+发送候选 的完整管线
-
-**Unity C# 端**：
-- `ObjectCandidateUI.cs`（新建）：3 张横向候选卡片 UI，鼠标悬停高亮 + 点击确认，`OnObjectCandidates` 事件驱动，选择后通过 `PythonConnection.SendObjectSelected()` 回传
-- `PythonConnection.cs`：新增 `object_confirmed` / `character_confirmed` 消息路由
-
-**端到端数据流**：
-```
-指尖轨迹 → SketchBridge.commit()
-  → SketchRecognizer.recognize() → Top-3 物象
-  → UnitySender.send_object_candidates()
-  → Unity ObjectCandidateUI 显示 3 张卡片
-  → 用户点击选择
-  → PythonConnection.SendObjectSelected()
-  → server.py handle_object_selected()
-  → 物象注册为模块 → object_confirmed 回传 Unity
-```
-
-#### 11.7.2.2 Phase 3 实现详情（2026-05-10）
-
-**Python 端**：
-- `character_bridge.py`（新建）：`CharacterBridge` 类，连接 `CharacterRecommender` + `UnitySender`，`set_context()` → `recommend()` → 自动推荐+发送候选
-
-**Unity C# 端**：
-- `CharacterCandidateUI.cs`（新建）：3 张人物推荐卡片 UI，显示姓名+称号+推荐理由+得分条，左键选中、右键拒绝（→ 进入轮盘）
-
-**端到端数据流**：
-```
-颜色 + 已选物象 → CharacterBridge.recommend()
-  → CharacterRecommender.recommend() → Top-3 人物
-  → UnitySender.send_character_candidates()
-  → Unity CharacterCandidateUI 显示 3 张人物卡片
-  → 用户左键选择 / 右键拒绝
-  → PythonConnection.SendCharacterSelected()
-  → server.py handle_character_selected()
-  → 人物注册为模块 → character_confirmed 回传 Unity
-```
-
-#### 11.7.2.3 Phase 5 实现详情（2026-05-10）
-
-**Python 端**：
-- `vision/gesture_state_machine.py`（新建）：`GestureStateMachine` 多模式状态机
-  - 5 个顶层模式：GLOBAL / DRAWING / CANDIDATE / CHAR_RECOMMEND / CHAR_WHEEL
-  - 每模式子状态枚举
-  - 手势检测：`_recognize_gesture()` 支持食指伸出/握拳/张手
-  - 绘画轨迹录制：食指指尖 (landmark 8) 自动累积 `(x, y, ts_ms)`
-  - 回调接口：`on_mode_change` → UnitySender.send_gesture_state(), `on_drawing_commit` → SketchBridge.commit()
-  - 外部触发：`trigger_char_recommend()`, `trigger_object_candidates()`, `reset_to_global()`
-
-**Unity C# 端**：
-- `GestureStateUI.cs`（新建）：屏幕右上角模式指示器，中文模式名+子状态+手势名
-
-**手势检测规则**：
-| 手势 | 规则 |
+| 项目 | 内容 |
 |------|------|
-| 食指伸出 | 食指 tip.y < MCP.y - 0.03，其余三指 tip.y > MCP.y |
-| 握拳 | 四指全部 tip.y > MCP.y - 0.03 |
-| 张手 | 四指全部 tip.y < MCP.y - 0.03 |
-
-#### 11.7.3 新增消息类型规格
-
-**Phase 1 — sender.py 接口** ✅ 已完成（2026-05-10）
-
-```python
-class UnitySender:
-    """Python → Unity 统一消息发送器"""
-    def __init__(self, host="127.0.0.1", port=8888, hand_port=8889): ...
-    def connect(self) -> bool: ...
-    def connect_hand(self) -> bool: ...
-    def reconnect(self) -> bool: ...        # 重连所有通道
-    def send(self, data: dict) -> bool: ... # 底层发送，自动追加 \n
-    def send_raw(self, data: dict) -> bool: ...  # 失败自动重连重试
-    def send_object_candidates(self, color, candidates): ...
-    def send_character_candidates(self, candidates): ...
-    def send_wheel_state(self, groups, current_group, characters, highlighted): ...
-    def send_gesture_state(self, mode, sub_state, gesture): ...
-    def send_hand_data(self, landmarks, palm_center, ...): ...
-    def close(self): ...
-```
-
-**Phase 2 — Act 2 物象候选** ✅ 已完成（2026-05-10）
-
-```
-Python → Unity: object_candidates
-{
-  "type": "object_candidates",
-  "color": "岳麓绿",
-  "candidates": [
-    {"name": "古树", "score": 0.89, "qd_category": "tree"},
-    {"name": "竹林", "score": 0.72, "qd_category": "tree"},
-    {"name": "林荫道", "score": 0.65, "qd_category": "tree"}
-  ]
-}
-
-Unity → Python: object_selected
-{
-  "type": "object_selected",
-  "name": "古树"
-}
-```
-
-**Phase 3 — Act 3 人物推荐** ✅ 已完成（2026-05-10）
-
-```
-Python → Unity: character_candidates
-{
-  "type": "character_candidates",
-  "candidates": [
-    {"name": "王夫之", "title": "思想家", "score": 0.85, "reason": "经典搭配推荐"},
-    {"name": "胡安国", "title": "经学家", "score": 0.72, "reason": "关键词匹配"},
-    {"name": "胡宏", "title": "思想家", "score": 0.68, "reason": "与已选人物同脉"}
-  ]
-}
-
-Unity → Python: character_selected
-{
-  "type": "character_selected",
-  "name": "王夫之"
-}
-```
-
-**Phase 4 — Act 3 人物轮盘**
-
-```
-Python → Unity: wheel_state
-{
-  "type": "wheel_state",
-  "groups": ["理学脉络", "湘军将帅", "维新革命", "现代学人", "校园角色"],
-  "current_group": "理学脉络",
-  "characters": [
-    {"name": "周敦颐", "title": "理学开创者"},
-    {"name": "程颢", "title": "理学宗师"},
-    ...
-  ],
-  "highlighted_index": 0
-}
-
-Unity → Python: wheel_group_changed
-{
-  "type": "wheel_group_changed",
-  "group": "湘军将帅"
-}
-
-Unity → Python: wheel_character_selected
-{
-  "type": "wheel_character_selected",
-  "name": "曾国藩"
-}
-```
-
-**Phase 5 — 手势状态机→Unity**
-
-```
-Python → Unity: gesture_state
-{
-  "type": "gesture_state",
-  "mode": "DRAWING",           # GLOBAL | DRAWING | CANDIDATE | CHAR_RECOMMEND | CHAR_WHEEL
-  "sub_state": "TRACKING",     # 各 mode 内的子状态
-  "gesture": "index_pointing"  # 当前识别到的手势
-}
-```
-
-#### 11.7.4 Unity C# 端接入要点
-
-**TCP 连接**：
-- 主通道：`127.0.0.1:8888` — 接收所有业务消息（candidates, wheel_state 等），发送用户选择
-- 手部通道：`127.0.0.1:8889` — 实时手部 landmark 数据（每帧）
-
-**消息解析**：
-- 格式：`JSON + \n` 分隔
-- 每条消息含 `type` 字段用于路由分发
-- 使用 `JsonUtility.FromJson<T>()` 反序列化（需扁平化数组，见 hand_server.py 的 `_flatten` 处理）
-
-**消息路由**：
-```csharp
-void OnMessage(string json) {
-    var msg = JsonUtility.FromJson<BaseMessage>(json);
-    switch (msg.type) {
-        case "object_candidates":     HandleObjectCandidates(json); break;
-        case "character_candidates":  HandleCharacterCandidates(json); break;
-        case "wheel_state":           HandleWheelState(json); break;
-        case "hand_tracking":         HandleHandTracking(json); break;
-        case "gesture_state":         HandleGestureState(json); break;
-    }
-}
-```
-
-**UI 组件需求**：
-| 消息 | Unity UI 表现 |
-|------|-------------|
-| `object_candidates` | 3 张横向候选卡片，显示名称 + 置信度条 + 颜色标识 |
-| `character_candidates` | 3 张人物卡片，显示名称 + 称号 + 推荐理由 |
-| `wheel_state` | 当前组横向滚动卡片列表，高亮卡片放大 |
-| `gesture_state` | 状态指示器（绘画中/识别中/选择中） |
+| 核心人物 | 54 人，6 组（理学脉络12/湘军将帅4/维新革命6/现代学人12/校园角色13/抽象意象9） |
+| 文件 | `rag/character_recommend.py` |
 
 ---
 
-### 11.8 开发优先级
+## 四、模块三：Unity 通信与渲染
+
+### 4.1 通信架构
+
+双端口 TCP，JSON + `\n` 分隔：
+
+| 端口 | 通道 | 频率 | 内容 |
+|------|------|------|------|
+| **:8888** | 主通道 | 事件驱动 | 候选物象、推荐人物、手势状态、确认/拒绝 |
+| **:8889** | 手部通道 | ~30fps | 21 关键点 + 5 指尖 + 掌心坐标 |
+
+Python 端入口：`test_integrated.py`（串联摄像头→手部→FSM→Bridge→TCP 全链路）
+
+### 4.2 消息类型
+
+**Python → Unity**：
+
+| 消息 | 内容 |
+|------|------|
+| `object_candidates` | Top-3 物象候选（名称、分数、QuickDraw 类别） |
+| `character_candidates` | Top-3 人物推荐（名称、称号、分数、推荐理由） |
+| `gesture_state` | 当前 FSM 模式 + 子状态 + 手势类型 |
+| `hand_tracking` | 21 个关键点像素坐标 + 指尖 + 掌心（每帧） |
+
+**Unity → Python**：
+
+| 消息 | 内容 |
+|------|------|
+| `object_selected` | 用户确认选中的物象名 |
+| `character_selected` | 用户确认选中的人物名 |
+| `wheel_group_changed` | 轮盘分组切换 |
+| `wheel_character_selected` | 轮盘选中人物 |
+| `generation_start` | 触发最终叙事生成 |
+
+### 4.3 Bridge 层
+
+| Bridge | 文件 | 职责 |
+|--------|------|------|
+| ColorCardBridge | （待模型训练后新建） | YOLO 检测 → Unity 颜色牌消息 |
+| SketchBridge | `unity_bridge/sketch_bridge.py` | CNN 分类 → Top-3 物象候选 |
+| CharacterBridge | `unity_bridge/character_bridge.py` | RAG 推荐 → Top-3 人物推荐 |
+
+### 4.4 Unity 端组件
+
+| 组件 | 功能 |
+|------|------|
+| `PythonConnection` | :8888 主通道 TCP 客户端，消息路由分发 |
+| `HandTrackingConnection` | :8889 手部通道 TCP 客户端 |
+| `HandTrackingVisualizer` | Canvas UI 实时渲染 21 关键点 + 骨架 + 指尖 + 掌心 |
+| `ObjectCandidateUI` | Top-3 物象候选卡片（悬停高亮 + 点击确认） |
+| `CharacterCandidateUI` | Top-3 人物推荐卡片（名称+称号+理由+得分条） |
+| `GestureStateUI` | 右上角 FSM 模式指示器 |
+| `SceneSetup` | 一键自动创建所有通信和 UI 组件 |
+
+### 4.5 延迟优化
+
+| 措施 | 效果 |
+|------|------|
+| TCP_NODELAY（禁用 Nagle） | 消除 ~200ms 缓冲延迟 |
+| 摄像头缓冲排空（每帧 4 次 read） | 消除 2-3 帧旧数据堆积 |
+| no-display 模式 | 省去 frame.copy() + cv2.imshow |
+| Canvas UI（替代 Sprite） | 直接屏幕像素映射 |
+| 预创建对象池 | 消除每帧 GC 内存抖动 |
+
+---
+
+## 五、实现状态
+
+### 5.1 模块状态
+
+| 模块 | 子模块 | 状态 |
+|------|--------|------|
+| **视觉输入** | YOLO 颜色牌检测 | 🔸 接口就绪，待训练 |
+| | MediaPipe 手部追踪 | ✅ |
+| | 手势状态机（5 模式 FSM） | ✅ |
+| | QuickDraw CNN 草图识别 | ✅ val acc 83.8% |
+| | IP 摄像头连接 | ✅ |
+| **RAG 内容生成** | 知识库（208 实体 + 107 组合 + 100 模板） | ✅ |
+| | 检索引擎（精确+双向） | ✅ |
+| | LLM 生成（qwen-turbo / qwen-plus） | ✅ |
+| | 云端生图（wanx-v1） | ✅ |
+| | 人物推荐引擎（54 人，四维打分） | ✅ |
+| | 明信片合成（动态布局） | ✅ |
+| **Unity 通信** | 双端口 TCP 服务器 | ✅ |
+| | UnitySender 统一发送器 | ✅ |
+| | Bridge 层（sketch / character） | ✅ |
+| | Unity C# 消息路由 + UI 组件 | ✅ |
+| | 轮盘浏览 | ⏸️ 暂缓 |
+
+### 5.2 完成度
+
+| 模块 | 总项 | ✅ | 🔸 | ⏸️ | 完成度 |
+|------|------|----|----|----|--------|
+| 视觉输入 | 5 | 4 | 1 | 0 | **80%** |
+| RAG 内容生成 | 6 | 6 | 0 | 0 | **100%** |
+| Unity 通信与渲染 | 5 | 4 | 0 | 1 | **80%** |
+| **总计** | **16** | **14** | **1** | **1** | **~88%** |
+
+> 颜色牌 YOLO 模型训练后（1-2 天工作量：采集+标注+训练），视觉输入模块可达 100%，整体完成度 ~94%。
+> 轮盘为 P2 暂缓项，不影响四幕叙事主流程。
+
+### 5.3 端到端可运行能力
+
+| 能力 | 状态 |
+|------|------|
+| 摄像头 → MediaPipe → FSM → SketchBridge → Unity 物象候选 | ✅ |
+| 摄像头 → MediaPipe → FSM → CharacterBridge → Unity 人物推荐 | ✅ |
+| 颜色牌检测 → Unity 消息推送 | 🔸 mock 模式可跑 |
+| RAG 检索 → LLM 叙事 → wanx-v1 生图 → 明信片合成 | ✅ |
+| 手部 21 关键点 → Unity 实时可视化 | ✅ |
+
+---
+
+## 六、附录
+
+### 6.1 已解决的 Bug
+
+| # | 问题 | 修复 |
+|---|------|------|
+| 1 | 文本生成输出为空（读错字段路径） | `rag/generator.py`: 优先取 `choices[0].message.content` |
+| 2 | 图像模型名错误（`qwen-image-2.0-pro` 不存在） | 改为 `wanx-v1`，支持 `prompt_extend` |
+| 3 | 明信片排版严重错乱（图片被挤压/文字不换行/画布不足） | `rag/postcard.py` 完全重写布局引擎 |
+| 4 | API Key 未传递到生成器 | `create_generator()` 自动读环境变量 |
+| 5 | 集成测试时间戳非单调递增 | 每帧只调一次 `_detect()`，复用结果 |
+| 6 | Unity 始终连不上（`is_running` 时序错误） | 移动 `is_running = True` 到 `_start_servers()` 之前 |
+| 7 | gesture_state 消息静默丢失（超时断开） | `select.select()` 隔离收发超时 |
+| 8 | Unity 手部数据解析失败（字段名不匹配） | 重写 `HandTrackingData` 对齐 Python 格式 |
+| 9 | 延迟高 | 双方 TCP_NODELAY + 缓冲排空 + no-display 模式 |
+
+### 6.2 待处理
+
+| 优先级 | 事项 | 说明 |
+|--------|------|------|
+| **P0** | YOLO 颜色牌数据采集+训练 | 6 类颜色牌，~100-200 张/类，标注后训练 |
+| P1 | 字体 zip 解压 | `assets/fonts/SourceHanSansSC.zip` → 优先思源字体 |
+| P2 | 多场景覆盖测试 | 不同颜色+物象+人物组合的生成效果 |
+| P2 | BM25 模糊检索 | 当前精确匹配，缺模糊检索能力 |
+| P2 | 人物轮盘 | Phase 4，非主线暂缓 |
+
+### 6.3 关键文件索引
 
 ```
-P0（核心通路必须跑通）：
-  1. sender.py 统一发送器                                        ✅ 已完成
-  2. object_candidates / object_selected 消息（Act 2 通路）      ✅ 已完成
-  3. character_candidates / character_selected 消息（Act 3 推荐通路） ✅ 已完成
-  4. wheel_state / wheel_character_selected 消息（Act 3 轮盘通路） ⏸️ 暂缓
-  5. 手势状态机多模式框架                                        ✅ 已完成
-  6. 食指伸出检测 + 轨迹录制                                     ✅ 已完成
-  7. QuickDraw ONNX 模型推理                                     ✅ 已完成
-  8. 人物推荐引擎接口                                            ✅ 已完成
+vision/
+├── color_card_detector.py      # YOLO 颜色牌检测（接口就绪）
+├── hand_detector.py            # MediaPipe 手部检测
+├── hand_tracker.py             # 手部追踪封装
+├── gesture_state_machine.py    # 5 模式手势 FSM
+├── sketch_recognizer.py        # QuickDraw CNN 草图识别
+├── quickdraw/                  # CNN 训练/数据下载/模型定义
+│   ├── train.py, model.py, dataset.py, config.py
+│   └── download_data.py
+└── models/
+    └── quickdraw_mobilenet.onnx # 82 类 ONNX 模型 (2.5MB)
 
-P1（完整体验）：
-  9. gesture_state 消息（状态机状态同步到 Unity）                 ✅ 已完成
-  10. 颜色上下文加权排序                                         ✅ 已完成
-  11. 轮盘分组切换（Unity→Python→更新 wheel_state）               ⏸️ 暂缓
-  12. Unity C# 候选卡片 UI + 轮盘 UI                              ✅ 已完成（物象/人物卡片 UI 已就绪）
+rag/
+├── retriever.py                # BM25 + 精确匹配检索引擎
+├── generator.py                # LLM 生成（阿里云百炼）
+├── character_recommend.py      # 人物推荐引擎（四维打分）
+├── build_knowledge.py          # txt → json 知识库构建
+├── postcard.py                 # 明信片合成（PIL 动态布局）
+└── knowledge/                  # 知识库 JSON
+    ├── entities/               # colors(23) + objects(88) + characters(97)
+    ├── combinations/           # 107 条组合解读
+    └── templates/              # 100 句叙事模板
+
+unity_bridge/
+├── server.py                   # :8888/:8889 双端口 TCP 服务器
+├── sender.py                   # UnitySender 统一消息发送器
+├── sketch_bridge.py            # 草图 → 物象候选桥接
+└── character_bridge.py         # RAG → 人物推荐桥接
+
+test_integrated.py              # 端到端集成测试入口
 ```
 
 ---
 
-### 11.9 端到端集成测试（2026-05-10）
-
-#### 11.9.1 集成测试脚本
-
-**`test_integrated.py`** — 完整集成测试入口，一个脚本串联所有模块：
-
-```
-摄像头 → HandTracker(MediaPipe) → GestureStateMachine(5模式)
-                                   ├→ SketchBridge(草图识别) → object_candidates → Unity :8888
-                                   ├→ CharacterBridge(人物推荐) → character_candidates → Unity :8888
-                                   └→ 手部landmark数据 → Unity :8889
-```
-
-**启动方式**：
-```bash
-# 完整模式（含 OpenCV 可视化窗口）
-python test_integrated.py [摄像头URL]
-
-# 无显示模式（延迟最低，推荐配合 Unity 使用）
-python test_integrated_fast.py [摄像头URL]
-```
-
-**无摄像头时**自动进入演示模式，键盘 1/2/3 模拟食指/握拳/张手，1-6 切换颜色。
-
-#### 11.9.2 集成测试发现并修复的问题
-
-| # | 问题 | 原因 | 修复 |
-|---|------|------|------|
-| 1 | 时间戳非单调递增 | 每帧调两次 `_detect()`，第二次时间戳相同 | 一次检测复用结果，直接计算像素坐标 |
-| 2 | Unity 始终连不上 | `is_running = True` 在 `_start_servers()` 之后设置，accept 线程立即退出 | 移动 `is_running` 到 `_start_servers()` 之前 |
-| 3 | gesture_state 消息丢失 | `client.settimeout(0.5)` 导致主线程 `sendall` 也可能超时并静默断开 | 改用 `select.select()` 隔离收发超时 |
-| 4 | Unity C# 解析手部数据失败 | `HandTrackingData.cs` 字段为 `contour`/`bounding_box`，不匹配 Python 发送的 `landmarks`/`fingertips` | 重写 `HandTrackingData` 匹配新数据格式 |
-| 5 | Unity 手部可视化不显示 | 原 `HandTrackingVisualizer` 使用世界空间 Sprite，坐标系不对 | 重写为 Canvas UI 版本，Screen Space Overlay |
-| 6 | 手部显示位置偏移/不占满屏 | `CanvasScaler` 参考分辨率默认 800x600 | 设为 1920x1080，新增 `positionScale`/`positionOffset`/`flipX`/`flipY` 可调参数 |
-| 7 | 延迟高 | Nagle 算法缓冲 + OpenCV 显示开销 + 摄像头帧堆积 | 双方 TCP_NODELAY + 缓冲排空 + `--no-display` 模式 |
-
-#### 11.9.3 延迟优化方案
-
-```
-优化项                           预期收益
-─────────────────────────────────────────
-TCP_NODELAY (双方)              消除 ~200ms 缓冲延迟
-摄像头缓冲排空（每帧连读4次）    消除 2-3 帧旧数据堆积
---no-display 模式               省去 frame.copy() + cv2.imshow
-Canvas UI 可视化（替代 Sprite）  直接屏幕像素映射，无坐标转换
-预创建对象池（无 GC 分配）       消除每帧内存抖动
-```
-
-#### 11.9.4 当前数据流状态
-
-```
-Python (:8888 主通道) ──→ Unity PythonConnection
-  · object_candidates     → ObjectCandidateUI（3 张候选卡片）
-  · character_candidates  → CharacterCandidateUI（3 张推荐卡片）
-  · gesture_state         → GestureStateUI（右上角模式指示器）
-  · connected / confirmed → 连接管理
-
-Python (:8889 手部通道) ──→ Unity HandTrackingConnection
-  · hand_tracking（每帧） → HandTrackingVisualizer（21 点骨架 + 指尖高亮）
-```
-
-#### 11.9.5 待后续完成（美术阶段）
-
-- [ ] 候选卡片替换为美术素材（当前为代码生成的纯色方块）
-- [ ] 手势状态指示器美化（当前为纯文本）
-- [ ] 手部骨架可视化风格化（当前为纯色圆点+线条）
-- [ ] 轮盘浏览 UI（Phase 4，暂缓）
-- [ ] 颜色选择 UI（第一幕入口）
-- [ ] 动画过渡效果（卡片出现/消失、模式切换）
+> 湖南大学设计艺术学院 · 智能设计方法 · 2026
