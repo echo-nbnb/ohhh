@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-YOLO 模型预测 / 多目标跟踪脚本
-使用训练好的模型检测模块，内置 BoT-SORT 跟踪器保持跨帧 ID 一致
+YOLO 颜色牌检测 — 实时预测与跟踪
+使用训练好的颜色牌检测模型（6 类），内置 BoT-SORT 跟踪器保持跨帧 ID 一致
 
 使用方法:
-    python predict_yolo.py                           # 使用默认摄像头
-    python predict_yolo.py --model best.pt          # 指定模型
-    python predict_yolo.py --source image.jpg        # 检测图片
-    python predict_yolo.py --source 0                # 使用默认摄像头
-    python predict_yolo.py --no-track               # 仅检测，不使用跟踪
+    python yolo/predict_yolo.py                           # 默认摄像头 + 默认模型
+    python yolo/predict_yolo.py --model yolo/color_card.pt  # 指定模型
+    python yolo/predict_yolo.py --source image.jpg        # 检测图片
+    python yolo/predict_yolo.py --no-track               # 仅检测，不使用跟踪
+
+模型部署到集成系统后请使用 vision/color_card_detector.py 替代本脚本。
 """
 
 import sys
@@ -20,7 +21,6 @@ sys.path.insert(0, '..')
 from ultralytics import YOLO
 from vision import IPCamera
 
-# 默认摄像头地址
 try:
     from config_ipcam import CAMERA_URL as DEFAULT_CAMERA
 except ImportError:
@@ -28,9 +28,9 @@ except ImportError:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='YOLO 模块检测')
+    parser = argparse.ArgumentParser(description='YOLO 颜色牌检测 (6 类)')
     parser.add_argument('--model', type=str,
-                       default='../runs/detect/module_detector/weights/best.pt',
+                       default='../runs/detect/color_card_detector/weights/best.pt',
                        help='模型路径')
     parser.add_argument('--source', type=str, default='0',
                        help='图片来源: 0=摄像头, 文件路径, 或视频路径')
@@ -46,11 +46,12 @@ def main():
 
     args = parser.parse_args()
 
+    CLASS_NAMES = ["岳麓绿", "书院红", "西迁黄", "湘江蓝", "校徽金", "墨色"]
+
     print("=" * 50)
-    print("YOLO 模块检测")
+    print("YOLO 颜色牌检测 (6 类)")
     print("=" * 50)
 
-    # 加载模型
     print(f"加载模型: {args.model}")
     try:
         model = YOLO(args.model)
@@ -59,9 +60,7 @@ def main():
         print("请先运行 train_yolo.py 训练模型")
         return
 
-    # 判断数据来源
     if args.source == '0':
-        # 使用IP摄像头
         print(f"连接摄像头: {args.camera}")
         camera = IPCamera(args.camera)
         if not camera.connect():
@@ -80,7 +79,7 @@ def main():
                 results = model.track(frame, conf=args.conf, persist=True, verbose=False)
 
             annotated = results[0].plot()
-            cv2.imshow("YOLO Detection" if args.no_track else "YOLO Tracking", annotated)
+            cv2.imshow("YOLO Color Card Detection", annotated)
 
             if cv2.waitKey(1) & 0xFF == 27:
                 break
@@ -89,7 +88,6 @@ def main():
         cv2.destroyAllWindows()
 
     else:
-        # 检测图片或视频
         print(f"检测来源: {args.source}")
         if args.no_track:
             results = model.predict(args.source, conf=args.conf, save=args.save)

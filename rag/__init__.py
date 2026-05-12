@@ -9,12 +9,12 @@ RAG 模块
     rag.setup()
 
     # 注册模块
-    rag.register_module("esp32_001", "color", "岳麓绿")
-    rag.register_module("esp32_002", "color", "书院红")
-    rag.register_module("esp32_003", "object", "书院")
+    rag.register_module("green_card", "color", "岳麓绿")
+    rag.register_module("red_card", "color", "书院红")
+    rag.register_module("tree", "object", "古树")
 
     # 实时检索（放置模块时）
-    result = rag.retrieve_realtime("esp32_001")
+    result = rag.retrieve_realtime("green_card")
 
     # 高质量生成（开始生成时）
     context = rag.build_generation_context()
@@ -80,7 +80,7 @@ class RAGSystem:
         注册模块
 
         Args:
-            module_id: ESP32模块ID
+            module_id: 模块唯一ID（如 "green_card", "tree_01"）
             module_type: 模块类型 (color/object/character)
             entity: 文化实体名称
         """
@@ -121,7 +121,7 @@ class RAGSystem:
 
         Returns:
             {
-                "module_id": "esp32_001",
+                "module_id": "green_card",
                 "entity": "岳麓绿",
                 "description": "...",
                 "connections": [...],

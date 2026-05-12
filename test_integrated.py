@@ -81,6 +81,7 @@ class IntegratedServer:
         self.fsm = None
         self.sketch_bridge = None
         self.character_bridge = None
+        self.color_card_detector = None  # YOLO 颜色牌检测（待训练后启用）
 
         # Socket
         self.main_socket: Optional[socket.socket] = None     # :8888 → Unity
@@ -93,6 +94,7 @@ class IntegratedServer:
         self.is_running = False
         self.use_fake_camera = False
         self.no_display = no_display
+        self.frame_count = 0
         self.current_color = "岳麓绿"  # 默认第一幕颜色
         self.selected_objects: List[str] = []
 
@@ -426,7 +428,17 @@ class IntegratedServer:
     def _on_reject_recommendations(self):
         print("  [FSM] 拒绝推荐 → 进入轮盘")
 
-    # ── 摄像头主循环 ───────────────────────────────────────
+        # 颜色牌检测器（YOLO mock 模式，待模型训练后切换真实检测）
+        try:
+            from vision.color_card_detector import create_color_card_detector
+            self.color_card_detector = create_color_card_detector(
+                model_path=None,  # TODO: 改为 "yolo/color_card.pt" 启用真实检测
+                frame_size=(640, 480),
+            )
+            print("[OK] ColorCardDetector 已就绪 (mock 模式)")
+        except Exception as e:
+            print(f"[!] ColorCardDetector 初始化失败: {e}")
+            self.color_card_detector = None
 
     def _run_camera_loop(self):
         from vision.hand_tracker import HAND_CONNECTIONS
@@ -443,7 +455,16 @@ class IntegratedServer:
                 time.sleep(0.005)
                 continue
 
+            self.frame_count += 1
             h, w = frame.shape[:2]
+
+            # ── YOLO 颜色牌检测（每 5 帧运行一次，待模型训练后启用） ──
+            if self.color_card_detector and self.frame_count % 5 == 0:
+                cards = self.color_card_detector.detect(frame)
+                # TODO: 模型就绪后取消注释，将检测结果发送 Unity
+                # if cards and self.main_client:
+                #     msg = self.color_card_detector.to_unity_message(cards)
+                #     self._send_main(msg)
 
             # 手部检测
             results = self.hand_tracker._detect(frame, ts)

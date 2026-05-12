@@ -1,7 +1,20 @@
+# YOLO 数据集配置 — 寻麓千年色 · 颜色牌检测
+#
+# 6 种颜色牌，用于第一幕"择色"阶段：
+#   摄像头俯拍桌面 → YOLO 实时检测颜色牌类型 + 位置 → 发送 Unity
+#
+# 标注工具: LabelImg / Label Studio (YOLO txt 格式)
+# 每张图一张同名 .txt，每行: class_id cx cy w h (归一化)
+
 path: ../dataset
 train: images/train
 val: images/val
 
-nc: 1
+nc: 6
 names:
-  0: m
+  0: yuelu_green     # 岳麓绿
+  1: academy_red      # 书院红
+  2: xiqian_yellow    # 西迁黄
+  3: xiangjiang_blue  # 湘江蓝
+  4: badge_gold       # 校徽金
+  5: ink_black        # 墨色
