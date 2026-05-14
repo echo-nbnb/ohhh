@@ -5,3 +5,7 @@ output/
 vision/quickdraw/data/
 vision/quickdraw/checkpoint.pth
 vision/pidinet/*.pth
+# YOLO training artifacts (keep only best.pt + last.pt)
+yolo/runs/*/*/epoch_*.pt
+# temp downloads
+temp_*
