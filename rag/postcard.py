@@ -39,8 +39,7 @@ class PostcardConfig:
     system_font_dir: str = r"C:\Windows\Fonts"
 
     # 布局比例
-    image_ratio: float = 0.55    # 底图占画面55%
-    content_start_y: int = 850   # 文字内容起始Y
+    image_ratio: float = 0.55    # 底图占默认画面55%
 
 
 class FontManager:
@@ -145,119 +144,130 @@ class PostcardGenerator:
             print(f"[错误] 图像下载失败: {e}")
             return None
 
-    def _create_canvas(self) -> Image.Image:
-        """创建画布（宣纸底）"""
-        canvas = Image.new('RGB',
-                          (self.config.width, self.config.height),
-                          self.config.bg_color)
-        return canvas
+    # 布局常量
+    MARGIN_X = 60               # 正文左右边距
+    CHARS_PER_LINE = 22          # 每行约字数（32px 字体）
+    LINE_HEIGHT = 50             # 行高
+    PARA_SPACING = 30            # 段间距
+    FOOTER_HEIGHT = 140          # 落款 + 印章区高度
+    PAINTING_GAP = 50            # 底图与正文间距
 
-    def _paste_painting(self, canvas: Image.Image, painting: Image.Image):
-        """粘贴底图"""
-        # 调整底图尺寸
+    def _wrap_para(self, draw: ImageDraw.Image, text: str,
+                   font: ImageFont.FreeTypeFont, max_width: int) -> List[str]:
+        """按像素宽度逐字换行，返回行列表"""
+        lines = []
+        current = ""
+        for ch in text:
+            test = current + ch
+            if draw.textbbox((0, 0), test, font=font)[2] <= max_width:
+                current = test
+            else:
+                lines.append(current)
+                current = ch
+        if current:
+            lines.append(current)
+        return lines
+
+    def _calc_text_height(self, draw: ImageDraw.Image, paragraphs: List[str],
+                          font: ImageFont.FreeTypeFont, max_width: int) -> int:
+        """计算叙事文字所需总高度"""
+        total = 0
+        for para in paragraphs:
+            lines = self._wrap_para(draw, para, font, max_width)
+            total += len(lines) * self.LINE_HEIGHT + self.PARA_SPACING
+        return total
+
+    def _create_canvas(self, height: int = None) -> Image.Image:
+        """创建画布（宣纸底），高度可选动态"""
+        h = height or self.config.height
+        return Image.new('RGB', (self.config.width, h), self.config.bg_color)
+
+    def _paste_painting(self, canvas: Image.Image, painting: Image.Image,
+                        content_start_y: int):
+        """粘贴底图，content_start_y 为正文起始位置"""
         target_height = int(self.config.height * self.config.image_ratio)
         aspect_ratio = painting.width / painting.height
         target_width = int(target_height * aspect_ratio)
 
-        # 如果宽度超出，缩放
         if target_width > self.config.width:
             target_width = self.config.width
             target_height = int(target_width / aspect_ratio)
 
         painting = painting.resize((target_width, target_height), Image.LANCZOS)
-
-        # 粘贴到底部（留出上方空间给文字）
-        y_offset = self.config.content_start_y - target_height - 50
+        y_offset = content_start_y - target_height - self.PAINTING_GAP
         x_offset = (self.config.width - target_width) // 2
-
-        canvas.paste(painting, (x_offset, y_offset))
+        canvas.paste(painting, (x_offset, max(y_offset, 0)))
 
     def _draw_title(self, canvas: Image.Image, title: str):
         """绘制标题"""
         draw = ImageDraw.Draw(canvas)
         font = self.font_manager.get_title_font(60)
-
-        # 计算居中位置
         bbox = draw.textbbox((0, 0), title, font=font)
         text_width = bbox[2] - bbox[0]
         x = (self.config.width - text_width) // 2
         y = 100
-
-        # 绘制阴影效果（模拟书法墨迹）
         draw.text((x + 2, y + 2), title, font=font, fill=(180, 170, 160))
         draw.text((x, y), title, font=font, fill=self.config.title_color)
 
-    def _draw_narrative(self, canvas: Image.Image, paragraphs: List[str]):
-        """绘制叙事正文"""
+    def _draw_narrative(self, canvas: Image.Image, paragraphs: List[str],
+                        start_y: int) -> int:
+        """绘制叙事正文，返回结束 Y 坐标"""
         draw = ImageDraw.Draw(canvas)
         font = self.font_manager.get_text_font(32)
-
-        y = self.config.content_start_y
-        line_spacing = 70  # 行间距
+        max_width = self.config.width - self.MARGIN_X * 2
+        y = start_y
 
         for para in paragraphs:
-            # 自动换行（简单实现）
-            words = para
-            if len(words) > 20:
-                # 每行约20字
-                lines = [words[i:i+20] for i in range(0, len(words), 20)]
-                words = "\n".join(lines)
+            lines = self._wrap_para(draw, para, font, max_width)
+            for line in lines:
+                draw.text((self.MARGIN_X, y), line, font=font,
+                         fill=self.config.text_color)
+                y += self.LINE_HEIGHT
+            y += self.PARA_SPACING
 
-            draw.text((60, y), words, font=font, fill=self.config.text_color)
-            y += line_spacing
+        return y
 
-    def _draw_divider(self, canvas: Image.Image):
-        """绘制分隔线（简约水墨风格）"""
+    def _draw_divider(self, canvas: Image.Image, content_start_y: int):
+        """绘制分隔线"""
         draw = ImageDraw.Draw(canvas)
-        y = self.config.content_start_y - 30
-
-        # 画一条淡淡的水平线
+        y = content_start_y - 30
         draw.line([(100, y), (self.config.width - 100, y)],
                  fill=(180, 170, 160), width=1)
 
-    def _draw_signature(self, canvas: Image.Image, text: str, date_str: str = None):
-        """绘制落款"""
+    def _draw_signature(self, canvas: Image.Image, text: str,
+                        date_str: str = None, top_y: int = 0):
+        """绘制落款，top_y 为正文结束后的起始位置"""
         draw = ImageDraw.Draw(canvas)
         font = self.font_manager.get_signature_font(28)
-
         if date_str is None:
             date_str = datetime.now().strftime("%Y.%m.%d")
-
-        # 底部右侧
         x = self.config.width - 280
-        y = self.config.height - 100
-
+        y = top_y + 20
         draw.text((x, y), text, font=font, fill=self.config.signature_color)
         draw.text((x, y + 40), date_str, font=font, fill=self.config.signature_color)
 
-    def _draw_seal(self, canvas: Image.Image, text: str = "湖大"):
-        """绘制印章（右下角）"""
+    def _draw_seal(self, canvas: Image.Image, text: str = "湖大",
+                   top_y: int = 0):
+        """绘制印章，top_y 为正文结束后的起始位置"""
         draw = ImageDraw.Draw(canvas)
         font = self.font_manager.get_seal_font(28)
-
-        # 印章位置
         seal_size = 70
         seal_x = self.config.width - 100 - seal_size
-        seal_y = self.config.height - 100 - seal_size
-
-        # 印章框
+        seal_y = top_y + 10
         draw.rectangle([seal_x, seal_y, seal_x + seal_size, seal_y + seal_size],
                       outline=self.config.seal_color, width=2)
-
-        # 印章文字（居中）
         bbox = draw.textbbox((0, 0), text, font=font)
         text_w = bbox[2] - bbox[0]
         text_h = bbox[3] - bbox[1]
         text_x = seal_x + (seal_size - text_w) // 2
         text_y = seal_y + (seal_size - text_h) // 2
-
         draw.text((text_x, text_y), text, font=font, fill=self.config.seal_color)
 
     def create_postcard(self,
                        narrative_result: Dict,
                        image_source: str = None) -> Optional[Image.Image]:
         """
-        生成明信片
+        生成明信片（画布高度随文字内容动态调整）
 
         Args:
             narrative_result: {
@@ -274,8 +284,27 @@ class PostcardGenerator:
             print("[错误] Pillow未安装")
             return None
 
+        # 计算底图区域
+        painting_area_height = int(self.config.height * self.config.image_ratio)
+        content_start_y = painting_area_height + self.PAINTING_GAP
+
+        # 计算叙事文字所需高度
+        paragraphs = narrative_result.get("paragraphs", [])
+        if paragraphs:
+            temp_img = Image.new('RGB', (self.config.width, 100))
+            temp_draw = ImageDraw.Draw(temp_img)
+            font = self.font_manager.get_text_font(32)
+            max_width = self.config.width - self.MARGIN_X * 2
+            text_height = self._calc_text_height(temp_draw, paragraphs, font, max_width)
+        else:
+            text_height = 0
+
+        # 动态画布高度
+        total_height = content_start_y + text_height + self.FOOTER_HEIGHT
+        canvas_height = max(self.config.height, total_height)
+
         # 1. 创建画布
-        canvas = self._create_canvas()
+        canvas = self._create_canvas(canvas_height)
 
         # 2. 加载并粘贴底图
         painting = None
@@ -286,26 +315,26 @@ class PostcardGenerator:
                 painting = self._load_image_from_url(image_source)
 
             if painting:
-                self._paste_painting(canvas, painting)
+                self._paste_painting(canvas, painting, content_start_y)
 
         # 3. 绘制标题
         title = narrative_result.get("title", "你寻到的千年色")
         self._draw_title(canvas, title)
 
         # 4. 绘制分隔线
-        self._draw_divider(canvas)
+        self._draw_divider(canvas, content_start_y)
 
         # 5. 绘制叙事正文
-        paragraphs = narrative_result.get("paragraphs", [])
+        end_y = content_start_y
         if paragraphs:
-            self._draw_narrative(canvas, paragraphs)
+            end_y = self._draw_narrative(canvas, paragraphs, content_start_y)
 
         # 6. 绘制落款
         date_str = datetime.now().strftime("%Y.%m.%d")
-        self._draw_signature(canvas, "湖南大学 · 寻麓千年色", date_str)
+        self._draw_signature(canvas, "湖南大学 · 寻麓千年色", date_str, top_y=end_y)
 
         # 7. 绘制印章
-        self._draw_seal(canvas, "湖大")
+        self._draw_seal(canvas, "湖大", top_y=end_y)
 
         return canvas
 

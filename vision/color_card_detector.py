@@ -1,26 +1,51 @@
 """
 YOLO 颜色牌检测器 — 第一幕"择色"
+展览暗光环境采用 颜色+纹路 双保险识别方案。
 
-摄像头俯拍桌面，实时检测用户放置的颜色牌（6 种），
-输出每张牌的类型 + 像素位置，经坐标映射后发送 Unity。
-
-当前状态: 预留 YOLO 接口，mock 模式可跑通全链路。
-模型训练后只需放入权重文件并设置 model_path 即可切换真实检测。
+识别管线:
+    摄像头帧 → YOLOv8n 定位卡片区域 → 裁剪卡片区域
+                                           ↓
+                    ┌──────────────────────┴──────────────────────┐
+                    ↓                                             ↓
+            颜色识别器                                    纹路识别器
+            HSV 直方图匹配                              PiDiNet 边缘 + 模板匹配
+                    ↓                                             ↓
+                    └──────────────────────┬──────────────────────┘
+                                           ↓
+                                    决策融合
+                              color × 0.4 + edge × 0.6
+                                           ↓
+                                   最终类别 + 置信度
 
 使用方式:
-    detector = ColorCardDetector()               # mock 模式
-    detector = ColorCardDetector(model_path="yolo/color_card.pt")  # 真实模式
-    cards = detector.detect(frame)               # → List[ColorCardDetection]
+    # 首次使用：采集模板
+    collect_templates()  # 需在光线良好环境下对每种颜色牌采集一次
+
+    # 正常检测
+    detector = ColorCardDetector(
+        yolo_path="yolo/color_card.pt",
+        template_path="vision/color_card_templates.npz"
+    )
+    cards = detector.detect(frame)  # → List[ColorCardDetection]
 """
 
+import os
 import logging
-import random
-from typing import List, Optional, Tuple
+import json
+from typing import List, Optional, Tuple, Dict
 from dataclasses import dataclass
 from enum import Enum
 
+import torch
+import cv2
+import numpy as np
+
 logger = logging.getLogger("ColorCardDetector")
 
+
+# ---------------------------------------------------------------------------
+# 颜色牌类型定义
+# ---------------------------------------------------------------------------
 
 class ColorCardType(Enum):
     """六种颜色牌"""
@@ -33,7 +58,6 @@ class ColorCardType(Enum):
 
     @classmethod
     def from_class_id(cls, class_id: int) -> "ColorCardType":
-        """YOLO class_id → ColorCardType"""
         mapping = {
             0: cls.YUELU_GREEN,
             1: cls.ACADEMY_RED,
@@ -46,7 +70,6 @@ class ColorCardType(Enum):
 
     @classmethod
     def to_class_id(cls, card_type: "ColorCardType") -> int:
-        """ColorCardType → YOLO class_id"""
         reverse = {v: k for k, v in {
             0: cls.YUELU_GREEN,
             1: cls.ACADEMY_RED,
@@ -57,237 +80,770 @@ class ColorCardType(Enum):
         }.items()}
         return reverse.get(card_type, 0)
 
+    @classmethod
+    def all_types(cls) -> List["ColorCardType"]:
+        return list(cls)
+
+
+# ---------------------------------------------------------------------------
+# 检测结果数据类
+# ---------------------------------------------------------------------------
 
 @dataclass
 class ColorCardDetection:
     """单张颜色牌检测结果"""
     card_type: ColorCardType
-    confidence: float             # 置信度 [0, 1]
-    center: Tuple[int, int]       # 像素中心 (x, y)
+    confidence: float           # 融合置信度 [0, 1]
+    color_confidence: float     # 颜色识别置信度
+    edge_confidence: float     # 纹路识别置信度
+    center: Tuple[int, int]   # 像素中心 (x, y)
     bbox: Tuple[int, int, int, int]  # (x, y, w, h)
-    track_id: Optional[int] = None   # BoT-SORT 多目标跟踪 ID（跨帧一致）
+    track_id: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
-# 颜色牌检测器
+# 模板管理器
 # ---------------------------------------------------------------------------
 
-class ColorCardDetector:
-    """
-    颜色牌检测器
+class TemplateManager:
+    """管理颜色牌的 HSV 直方图和边缘图模板"""
 
-    两种模式:
-    - mock 模式 (model_path=None): 返回模拟检测结果，用于开发调试
-    - 真实模式 (model_path 指向 .pt 文件): YOLOv8 推理
+    def __init__(self, template_path: str):
+        self.template_path = template_path
+        self.templates: Dict[str, dict] = {}
+        self._load_or_init()
 
-    帧率目标: 摄像头 30fps，YOLOv8n 在 GPU 上 ~10ms/帧，CPU 上 ~50ms/帧
-    """
+    def _load_or_init(self):
+        """加载已有模板或初始化空模板"""
+        if os.path.exists(self.template_path):
+            try:
+                data = np.load(self.template_path, allow_pickle=True)
+                self.templates = data.item()
+                logger.info(f"模板已加载: {len(self.templates)} 种颜色牌")
+            except Exception as e:
+                logger.warning(f"模板加载失败: {e}，将创建新模板")
+                self.templates = {}
+        else:
+            logger.info("未找到模板文件，将创建新模板")
+            self.templates = {}
 
-    # 6 色 HSV 参考范围（暗光环境，需布展时微调）
-    # (h_min, s_min, v_min), (h_max, s_max, v_max)
+    def save(self):
+        """保存模板到文件"""
+        np.savez(self.template_path, **self.templates)
+        logger.info(f"模板已保存: {self.template_path}")
+
+    def add_template(self, card_type: ColorCardType, hsv_hist: np.ndarray,
+                     edge_map: np.ndarray, color_hist_hsv: np.ndarray = None):
+        """添加一个颜色牌的模板"""
+        self.templates[card_type.value] = {
+            "hsv_hist": hsv_hist,
+            "edge_map": edge_map,
+            "color_hist_hsv": color_hist_hsv or hsv_hist,
+        }
+        logger.info(f"已添加模板: {card_type.value}")
+
+    def has_template(self, card_type: ColorCardType) -> bool:
+        """检查是否有某颜色牌的模板"""
+        return card_type.value in self.templates
+
+    def get_template(self, card_type: ColorCardType) -> Optional[dict]:
+        """获取某颜色牌的模板"""
+        return self.templates.get(card_type.value)
+
+    @property
+    def is_ready(self) -> bool:
+        """检查是否所有 6 种颜色牌都有模板"""
+        return all(self.has_template(ct) for ct in ColorCardType.all_types())
+
+
+# ---------------------------------------------------------------------------
+# 颜色识别器
+# ---------------------------------------------------------------------------
+
+class ColorClassifier:
+    """基于 HSV 颜色直方图的颜色识别器"""
+
+    # 每种颜色牌的 HSV 主色调参考（展览暗光环境可能偏暗）
     HSV_RANGES = {
-        ColorCardType.YUELU_GREEN:     ((35, 50, 30), (85, 255, 200)),
-        ColorCardType.ACADEMY_RED:     ((0, 50, 30), (10, 255, 200)),
-        ColorCardType.XIQIAN_YELLOW:   ((20, 50, 50), (35, 255, 255)),
-        ColorCardType.XIANGJIANG_BLUE: ((100, 50, 30), (130, 255, 200)),
-        ColorCardType.BADGE_GOLD:      ((15, 80, 80), (30, 200, 255)),
-        ColorCardType.INK_BLACK:       ((0, 0, 0), (180, 255, 60)),
+        ColorCardType.YUELU_GREEN:     ((35, 40, 20), (85, 255, 200)),
+        ColorCardType.ACADEMY_RED:     ((0, 40, 20), (15, 255, 200)),
+        ColorCardType.XIQIAN_YELLOW:   ((15, 40, 40), (40, 255, 255)),
+        ColorCardType.XIANGJIANG_BLUE: ((95, 40, 20), (135, 255, 200)),
+        ColorCardType.BADGE_GOLD:      ((10, 60, 60), (35, 200, 255)),
+        ColorCardType.INK_BLACK:       ((0, 0, 0), (180, 50, 60)),
     }
 
-    def __init__(self, model_path: Optional[str] = None,
-                 conf_threshold: float = 0.5,
-                 frame_size: Tuple[int, int] = (640, 480)):
+    def __init__(self, template_manager: TemplateManager):
+        self.tmpl_mgr = template_manager
+
+    def classify(self, card_crop: np.ndarray) -> Tuple[ColorCardType, float]:
+        """
+        根据 HSV 直方图匹配识别颜色牌
+
+        Args:
+            card_crop: BGR 格式的卡片区域图像
+
+        Returns:
+            (颜色牌类型, 置信度 0-1)
+        """
+        # 转换为 HSV
+        hsv = cv2.cvtColor(card_crop, cv2.COLOR_BGR2HSV)
+
+        # 计算查询图像的 2D HSV 直方图 (H: 0-180, S: 0-256)
+        hist = cv2.calcHist([hsv], [0, 1], None, [180, 256], [0, 180, 0, 256])
+        cv2.normalize(hist, hist)
+
+        best_type = None
+        best_score = 0.0
+
+        for card_type in ColorCardType.all_types():
+            template = self.tmpl_mgr.get_template(card_type)
+            if template is None:
+                # 无模板时：用 HSV 范围检测
+                score = self._score_by_hsv_range(hsv, card_type)
+            else:
+                # 有模板时：直方图匹配
+                tmpl_hist = template["hsv_hist"]
+                score = cv2.compareHist(hist, tmpl_hist, cv2.HISTCMP_CORREL)
+
+            if score > best_score:
+                best_score = score
+                best_type = card_type
+
+        # 归一化分数到 [0, 1]
+        # 相关性系数范围通常是 [-1, 1]，映射到 [0, 1]
+        normalized_score = (best_score + 1) / 2 if best_score >= 0 else 0
+
+        return best_type, normalized_score
+
+    def _score_by_hsv_range(self, hsv: np.ndarray,
+                             card_type: ColorCardType) -> float:
+        """无模板时，用 HSV 范围检测（备用方案）"""
+        h_min, h_max = self.HSV_RANGES[card_type][0][0], self.HSV_RANGES[card_type][1][0]
+        s_min, s_max = self.HSV_RANGES[card_type][0][1], self.HSV_RANGES[card_type][1][1]
+        v_min, v_max = self.HSV_RANGES[card_type][0][2], self.HSV_RANGES[card_type][1][2]
+
+        # 统计落在范围内的像素比例
+        mask = cv2.inRange(hsv, (h_min, s_min, v_min), (h_max, s_max, v_max))
+        ratio = cv2.countNonZero(mask) / (hsv.shape[0] * hsv.shape[1])
+        return ratio
+
+
+# ---------------------------------------------------------------------------
+# 纹路识别器
+# ---------------------------------------------------------------------------
+
+class EdgeClassifier:
+    """基于 PiDiNet 边缘检测的纹路识别器"""
+
+    def __init__(self, template_manager: TemplateManager,
+                 pidinet_model=None, device: str = "cpu"):
+        self.tmpl_mgr = template_manager
+        self.pidinet = pidinet_model
+        self.device = device
+        self._edge_cache = {}
+
+    def classify(self, card_crop: np.ndarray,
+                 preprocess_func=None) -> Tuple[ColorCardType, float]:
+        """
+        根据边缘图纹路匹配识别颜色牌
+
+        Args:
+            card_crop: BGR 格式的卡片区域图像
+            preprocess_func: 可选，自定义边缘检测预处理函数
+
+        Returns:
+            (颜色牌类型, 置信度 0-1)
+        """
+        # 提取边缘
+        edge_map = self._extract_edge(card_crop, preprocess_func)
+
+        best_type = None
+        best_score = 0.0
+
+        for card_type in ColorCardType.all_types():
+            template = self.tmpl_mgr.get_template(card_type)
+            if template is None:
+                continue
+
+            tmpl_edge = template["edge_map"]
+
+            # 计算相似度：边缘重叠率 (IoU-style)
+            score = self._edge_similarity(edge_map, tmpl_edge)
+
+            if score > best_score:
+                best_score = score
+                best_type = card_type
+
+        return best_type, best_score
+
+    def _extract_edge(self, card_crop: np.ndarray,
+                      preprocess_func=None) -> np.ndarray:
+        """
+        从卡片区域提取边缘图
+
+        优先使用 PiDiNet，备选 Canny
+        """
+        if self.pidinet is not None and preprocess_func is not None:
+            # 使用 PiDiNet
+            try:
+                h, w = card_crop.shape[:2]
+                # 预处理：调整大小到 640x640（PiDiNet 输入尺寸）
+                input_size = 640
+                scale = input_size / max(h, w)
+                new_h, new_w = int(h * scale), int(w * scale)
+
+                resized = cv2.resize(card_crop, (new_w, new_h))
+                square = np.zeros((input_size, input_size, 3), dtype=np.uint8)
+                square[:new_h, :new_w] = resized
+
+                # 转换为 tensor
+                img_float = square.astype(np.float32) / 255.0
+                mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+                std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+                img_normalized = (img_float - mean) / std
+                img_tensor = torch.from_numpy(
+                    img_normalized.transpose(2, 0, 1)
+                ).float().unsqueeze(0).to(self.device)
+
+                # PiDiNet 推理
+                with torch.no_grad():
+                    outputs = self.pidinet(img_tensor)
+                    edge = outputs[-1].squeeze().cpu().numpy()
+
+                # 缩放回原始尺寸
+                edge_resized = cv2.resize(edge, (w, h))
+                return edge_resized
+
+            except Exception as e:
+                logger.warning(f"PiDiNet 推理失败: {e}，降级到 Canny")
+
+        # 备选：Canny 边缘检测
+        gray = cv2.cvtColor(card_crop, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 1.5)
+        edges = cv2.Canny(blurred, 50, 150)
+        return edges.astype(np.float32) / 255.0
+
+    def _edge_similarity(self, edge1: np.ndarray, edge2: np.ndarray) -> float:
+        """
+        计算两张边缘图的相似度（IoU-style）
+
+        Args:
+            edge1, edge2: 归一化到 [0, 1] 的边缘图
+
+        Returns:
+            相似度分数 [0, 1]
+        """
+        # 确保尺寸一致
+        if edge1.shape != edge2.shape:
+            edge2 = cv2.resize(edge2, (edge1.shape[1], edge1.shape[0]))
+
+        # 二值化
+        threshold = 0.3
+        e1_binary = (edge1 > threshold).astype(np.float32)
+        e2_binary = (edge2 > threshold).astype(np.float32)
+
+        # 计算 IoU
+        intersection = np.logical_and(e1_binary, e2_binary).sum()
+        union = np.logical_or(e1_binary, e2_binary).sum()
+
+        if union == 0:
+            return 0.0
+
+        return intersection / union
+
+
+# ---------------------------------------------------------------------------
+# 双识别器融合
+# ---------------------------------------------------------------------------
+
+class DualColorCardDetector:
+    """
+    颜色+纹路双保险颜色牌检测器
+
+    管线:
+        YOLOv8n 定位 → 颜色识别 → 纹路识别 → 决策融合
+        融合权重: color × 0.4 + edge × 0.6
+    """
+
+    # 融合权重
+    COLOR_WEIGHT = 0.4
+    EDGE_WEIGHT = 0.6
+
+    def __init__(self,
+                 yolo_path: Optional[str] = None,
+                 template_path: str = "vision/color_card_templates.npz",
+                 device: str = "cpu",
+                 conf_threshold: float = 0.5):
         """
         Args:
-            model_path: YOLO .pt 权重路径。None 则使用 mock 模式。
-            conf_threshold: 置信度阈值（仅真实模式生效）
-            frame_size: 摄像头帧尺寸 (w, h)，mock 模式用于生成合理位置
+            yolo_path: YOLO .pt 权重路径。None 则使用 mock 定位模式。
+            template_path: 颜色/边缘模板文件路径
+            device: 运行设备 "cpu" 或 "cuda"
+            conf_threshold: 最终置信度阈值
         """
-        self.model_path = model_path
+        self.yolo_path = yolo_path
+        self.template_path = template_path
+        self.device = device
         self.conf_threshold = conf_threshold
-        self.frame_size = frame_size
-        self._model = None
-        self._use_mock = model_path is None
 
-        if not self._use_mock:
-            self._load_model()
+        self._yolo = None
+        self._pidinet = None
+        self._use_mock_yolo = yolo_path is None
 
-    def _load_model(self):
-        """加载 YOLO 模型"""
-        try:
-            from ultralytics import YOLO
-            self._model = YOLO(self.model_path)
-            logger.info(f"YOLO 模型已加载: {self.model_path}")
-            self._use_mock = False
-        except FileNotFoundError:
-            logger.warning(f"模型文件不存在: {self.model_path}，降级到 mock 模式")
-            self._use_mock = True
-        except ImportError:
-            logger.warning("ultralytics 未安装，降级到 mock 模式")
-            self._use_mock = True
-        except Exception as e:
-            logger.error(f"YOLO 加载失败: {e}，降级到 mock 模式")
-            self._use_mock = True
+        # 组件
+        self.tmpl_mgr = TemplateManager(template_path)
+        self.color_clf = ColorClassifier(self.tmpl_mgr)
+        self.edge_clf = EdgeClassifier(self.tmpl_mgr, None, device)  # pidinet 延迟加载
 
-    # ------------------------------------------------------------------
-    # 检测入口
-    # ------------------------------------------------------------------
+        self._load_models()
 
-    def detect(self, frame) -> List[ColorCardDetection]:
+    def _load_models(self):
+        """加载 YOLO 和 PiDiNet 模型"""
+        # YOLO
+        if not self._use_mock_yolo and os.path.exists(self.yolo_path):
+            try:
+                from ultralytics import YOLO
+                self._yolo = YOLO(self.yolo_path)
+                self._use_mock_yolo = False
+                logger.info(f"YOLO 已加载: {self.yolo_path}")
+            except Exception as e:
+                logger.warning(f"YOLO 加载失败: {e}，使用 mock 模式")
+                self._use_mock_yolo = True
+
+        # PiDiNet（延迟加载，仅在首次需要纹路识别时加载）
+        # 注意：PiDiNet 需要 torch，已在 edge_detection_ipcam.py 中实现
+
+    def _ensure_pidinet(self):
+        """延迟加载 PiDiNet"""
+        if self._pidinet is None:
+            try:
+                from vision.edge_detection_ipcam import load_pidinet
+                self._pidinet, _ = load_pidinet()
+                self.edge_clf.pidinet = self._pidinet
+                logger.info("PiDiNet 已加载")
+            except Exception as e:
+                logger.warning(f"PiDiNet 加载失败: {e}，使用 Canny 备选")
+                self._pidinet = False  # 用 False 表示加载失败（不是 None）
+
+    def detect(self, frame: np.ndarray,
+               preprocess_func=None) -> List[ColorCardDetection]:
         """
         检测帧中的颜色牌
 
         Args:
             frame: BGR numpy 数组 (h, w, 3)
+            preprocess_func: PiDiNet 预处理函数（可选）
 
         Returns:
-            检测到的颜色牌列表，按置信度降序
+            检测到的颜色牌列表
         """
-        if self._use_mock or self._model is None:
-            return self._mock_detect(frame)
-        return self._yolo_detect(frame)
+        # 1. YOLO 定位（获取卡片区域）
+        if self._use_mock_yolo:
+            regions = self._mock_locate(frame)
+        else:
+            regions = self._yolo_locate(frame)
 
-    # ------------------------------------------------------------------
-    # YOLO 真实检测
-    # ------------------------------------------------------------------
+        if not regions:
+            return []
 
-    def _yolo_detect(self, frame) -> List[ColorCardDetection]:
-        """YOLOv8 推理 → ColorCardDetection 列表"""
-        results = self._model.track(
-            frame, conf=self.conf_threshold, persist=True, verbose=False
-        )
+        # 2. 对每个区域进行双识别
         detections = []
+        for bbox in regions:
+            x1, y1, x2, y2 = bbox
+            card_crop = frame[y1:y2, x1:x2]
 
-        if len(results) == 0 or results[0].boxes is None:
-            return detections
+            if card_crop.size == 0:
+                continue
 
-        boxes = results[0].boxes
-        for box in boxes:
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
-            conf = float(box.conf[0])
-            cls_id = int(box.cls[0])
-            track_id = int(box.id[0]) if box.id is not None else None
+            # 颜色识别
+            color_type, color_conf = self.color_clf.classify(card_crop)
 
-            w, h_box = x2 - x1, y2 - y1
-            cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
+            # 纹路识别（确保 PiDiNet 已加载）
+            self._ensure_pidinet()
+            edge_type, edge_conf = self.edge_clf.classify(
+                card_crop, preprocess_func
+            )
+
+            # 3. 决策融合
+            final_type, final_conf = self._fuse(
+                color_type, color_conf,
+                edge_type, edge_conf
+            )
+
+            if final_conf < self.conf_threshold:
+                continue
+
+            cx = (x1 + x2) // 2
+            cy = (y1 + y2) // 2
+            w, h = x2 - x1, y2 - y1
 
             detections.append(ColorCardDetection(
-                card_type=ColorCardType.from_class_id(cls_id),
-                confidence=conf,
+                card_type=final_type,
+                confidence=final_conf,
+                color_confidence=color_conf,
+                edge_confidence=edge_conf,
                 center=(cx, cy),
-                bbox=(int(x1), int(y1), int(w), int(h_box)),
-                track_id=track_id,
+                bbox=(x1, y1, w, h),
             ))
 
         detections.sort(key=lambda d: d.confidence, reverse=True)
         return detections
 
-    # ------------------------------------------------------------------
-    # Mock 检测（无模型时）
-    # ------------------------------------------------------------------
-
-    def _mock_detect(self, frame) -> List[ColorCardDetection]:
+    def _fuse(self,
+               color_type: ColorCardType, color_conf: float,
+               edge_type: ColorCardType, edge_conf: float
+               ) -> Tuple[ColorCardType, float]:
         """
-        Mock 模式：返回空列表。
+        融合颜色和纹路的识别结果
 
-        开发阶段可在此手动注入假数据来验证 Unity 通信链路。
-        示例:
-            return [
-                ColorCardDetection(
-                    card_type=ColorCardType.YUELU_GREEN,
-                    confidence=0.95,
-                    center=(320, 240),
-                    bbox=(280, 200, 80, 80),
-                )
-            ]
+        规则:
+        1. 两者一致 → 高置信，取加权平均
+        2. 两者不一致 → 优先纹路（权重更高），但降低置信度
+        3. 纹路置信度 > 0.6 → 信任纹路结果
         """
-        return []
+        if color_type == edge_type:
+            # 一致：加权平均
+            fused_conf = (color_conf * self.COLOR_WEIGHT +
+                         edge_conf * self.EDGE_WEIGHT)
+            return color_type, fused_conf
 
-    # ------------------------------------------------------------------
-    # 坐标映射（摄像头 → Unity 画布）
-    # ------------------------------------------------------------------
+        # 不一致
+        if edge_conf > 0.6:
+            # 纹路高置信，信任纹路
+            return edge_type, edge_conf * 0.8
+        elif color_conf > 0.7:
+            # 颜色高置信（但纹路不够高），信任颜色
+            return color_type, color_conf * 0.7
+        else:
+            # 两者都不够高，优先纹路（更高权重）
+            return edge_type, edge_conf * 0.6
 
-    def map_to_canvas(self, detection: ColorCardDetection,
-                      canvas_size: Tuple[int, int] = (1920, 1080)) -> Tuple[int, int]:
+    def _yolo_locate(self, frame) -> List[Tuple[int, int, int, int]]:
+        """YOLO 定位卡片区域"""
+        results = self._yolo.track(frame, conf=0.5, persist=True, verbose=False)
+        regions = []
+
+        if len(results) == 0 or results[0].boxes is None:
+            return regions
+
+        for box in results[0].boxes:
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            regions.append((int(x1), int(y1), int(x2), int(y2)))
+
+        return regions
+
+    def _mock_locate(self, frame) -> List[Tuple[int, int, int, int]]:
         """
-        将检测到的像素坐标映射到 Unity 画布坐标
+        Mock 定位模式：返回整帧作为候选区域。
 
-        Args:
-            detection: 检测结果
-            canvas_size: Unity 画布尺寸
-
-        Returns:
-            (x, y) Unity 画布坐标
+        调试用。实际部署时应使用 YOLO 定位。
         """
-        fx = canvas_size[0] / self.frame_size[0]
-        fy = canvas_size[1] / self.frame_size[1]
-        return (
-            int(detection.center[0] * fx),
-            int(detection.center[1] * fy),
-        )
+        h, w = frame.shape[:2]
+        # 返回中心区域作为候选
+        margin = 50
+        return [(margin, margin, w - margin, h - margin)]
 
-    def to_unity_message(self, detections: List[ColorCardDetection],
-                         canvas_size: Tuple[int, int] = (1920, 1080)) -> dict:
-        """
-        将检测结果转换为 Unity 消息格式
 
-        Args:
-            detections: 检测结果列表
-            canvas_size: Unity 画布尺寸
+# ---------------------------------------------------------------------------
+# 模板采集
+# ---------------------------------------------------------------------------
 
-        Returns:
-            {"type": "color_card_detections", "cards": [...]}
-        """
-        cards = []
-        for det in detections:
-            canvas_pos = self.map_to_canvas(det, canvas_size)
-            cards.append({
-                "card_type": det.card_type.value,
-                "class_id": ColorCardType.to_class_id(det.card_type),
-                "confidence": round(det.confidence, 4),
-                "pixel_center": list(det.center),
-                "canvas_center": list(canvas_pos),
-                "bbox": list(det.bbox),
-                "track_id": det.track_id,
-            })
+def collect_templates(camera_func=None,
+                      output_path: str = "vision/color_card_templates.npz",
+                      use_pidinet: bool = True):
+    """
+    采集颜色牌模板（在光线良好环境下执行一次）
 
-        return {
-            "type": "color_card_detections",
-            "count": len(cards),
-            "cards": cards,
-        }
+    对每种颜色牌拍摄 3-5 张不同角度/位置的照片，提取 HSV 直方图和边缘图作为模板。
+
+    Args:
+        camera_func: 返回下一帧的函数。如 None，则使用 cv2 摄像头。
+        output_path: 模板保存路径
+        use_pidinet: 是否使用 PiDiNet（True）或 Canny（False）
+
+    使用方式:
+        # 方式1：使用 IP 摄像头
+        from vision.ipcamera import IPCamera
+        cam = IPCamera("http://10.54.71.31:8080/video")
+        cam.connect()
+        collect_templates(lambda: cam.read_frame())
+
+        # 方式2：使用本地摄像头
+        import cv2
+        cap = cv2.VideoCapture(0)
+        collect_templates(lambda: cap.read()[1])
+
+        # 方式3：已有图像文件
+        import glob
+        imgs = glob.glob("color_cards/*.jpg")
+        # 需手动实现批量采集
+    """
+    import torch
+
+    tmpl_mgr = TemplateManager(output_path)
+
+    # 加载 PiDiNet
+    pidinet_model = None
+    if use_pidinet:
+        try:
+            from vision.edge_detection_ipcam import load_pidinet
+            pidinet_model, _ = load_pidinet()
+            pidinet_model.eval()
+            logger.info("PiDiNet 已加载")
+        except Exception as e:
+            logger.warning(f"PiDiNet 加载失败: {e}")
+            pidinet_model = None
+
+    edge_clf = EdgeClassifier(tmpl_mgr, pidinet_model, "cpu")
+
+    for card_type in ColorCardType.all_types():
+        print(f"\n{'='*50}")
+        print(f"请放置【{card_type.value}】颜色牌")
+        print("按 SPACE 键拍照（建议 3-5 张不同角度）")
+        print("按 NEXT 键跳到下一种颜色牌")
+        print("按 Q 键退出")
+        print(f"{'='*50}")
+
+        hsv_hist_sum = None
+        edge_sum = None
+        sample_count = 0
+
+        while True:
+            if camera_func:
+                frame = camera_func()
+            else:
+                import cv2
+                cap = cv2.VideoCapture(0)
+                ret, frame = cap.read()
+                cap.release()
+                if not ret:
+                    continue
+
+            # 显示预览
+            cv2.imshow("采集模板", frame)
+            key = cv2.waitKey(1) & 0xFF
+
+            if key == ord(' '):  # 空格：采集
+                # 手动框选或使用整帧
+                h, w = frame.shape[:2]
+                # 简单处理：中心区域
+                margin = 100
+                card_crop = frame[margin:h-margin, margin:w-margin]
+
+                # 提取 HSV 直方图
+                hsv = cv2.cvtColor(card_crop, cv2.COLOR_BGR2HSV)
+                hist = cv2.calcHist([hsv], [0, 1], None, [180, 256],
+                                   [0, 180, 0, 256])
+                cv2.normalize(hist, hist)
+
+                # 提取边缘
+                if pidinet_model is not None:
+                    try:
+                        # PiDiNet 预处理
+                        input_size = 640
+                        scale = input_size / max(card_crop.shape[:2])
+                        new_h = int(card_crop.shape[0] * scale)
+                        new_w = int(card_crop.shape[1] * scale)
+                        resized = cv2.resize(card_crop, (new_w, new_h))
+                        square = np.zeros((input_size, input_size, 3), dtype=np.uint8)
+                        square[:new_h, :new_w] = resized
+
+                        img_float = square.astype(np.float32) / 255.0
+                        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+                        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+                        img_norm = (img_float - mean) / std
+                        img_tensor = torch.from_numpy(
+                            img_norm.transpose(2, 0, 1)
+                        ).float().unsqueeze(0)
+
+                        with torch.no_grad():
+                            outputs = pidinet_model(img_tensor)
+                            edge = outputs[-1].squeeze().numpy()
+
+                        edge_resized = cv2.resize(
+                            edge, (card_crop.shape[1], card_crop.shape[0])
+                        )
+                    except Exception as e:
+                        logger.warning(f"PiDiNet 推理失败: {e}")
+                        gray = cv2.cvtColor(card_crop, cv2.COLOR_BGR2GRAY)
+                        blurred = cv2.GaussianBlur(gray, (5, 5), 1.5)
+                        edge_resized = cv2.Canny(blurred, 50, 150).astype(
+                            np.float32) / 255.0
+                else:
+                    gray = cv2.cvtColor(card_crop, cv2.COLOR_BGR2GRAY)
+                    blurred = cv2.GaussianBlur(gray, (5, 5), 1.5)
+                    edge_resized = cv2.Canny(blurred, 50, 150).astype(
+                        np.float32) / 255.0
+
+                # 累加
+                if hsv_hist_sum is None:
+                    hsv_hist_sum = hist
+                    edge_sum = edge_resized
+                else:
+                    hsv_hist_sum += hist
+                    edge_sum += edge_resized
+                sample_count += 1
+
+                print(f"  已采集 {sample_count} 张")
+
+            elif key == ord('n') or key == ord('q'):  # n: 下一种 / q: 退出
+                break
+
+        if sample_count > 0:
+            # 平均
+            hsv_hist_avg = hsv_hist_sum / sample_count
+            edge_avg = edge_sum / sample_count
+
+            tmpl_mgr.add_template(card_type, hsv_hist_avg, edge_avg)
+
+            if key == ord('q'):
+                break
+
+    tmpl_mgr.save()
+    print(f"\n模板采集完成，已保存到: {output_path}")
+
+    if tmpl_mgr.is_ready:
+        print("所有 6 种颜色牌模板就绪！")
+    else:
+        missing = [ct.value for ct in ColorCardType.all_types()
+                   if not tmpl_mgr.has_template(ct)]
+        print(f"警告：以下颜色牌缺少模板: {missing}")
+
+    cv2.destroyAllWindows()
+    return tmpl_mgr
+
+
+# ---------------------------------------------------------------------------
+# 坐标映射
+# ---------------------------------------------------------------------------
+
+def map_to_canvas(detection: ColorCardDetection,
+                  frame_size: Tuple[int, int],
+                  canvas_size: Tuple[int, int] = (1920, 1080)
+                  ) -> Tuple[int, int]:
+    """将检测到的像素坐标映射到 Unity 画布坐标"""
+    fx = canvas_size[0] / frame_size[0]
+    fy = canvas_size[1] / frame_size[1]
+    return (
+        int(detection.center[0] * fx),
+        int(detection.center[1] * fy),
+    )
+
+
+def to_unity_message(detections: List[ColorCardDetection],
+                     frame_size: Tuple[int, int],
+                     canvas_size: Tuple[int, int] = (1920, 1080)
+                     ) -> dict:
+    """将检测结果转换为 Unity 消息格式"""
+    cards = []
+    for det in detections:
+        canvas_pos = map_to_canvas(det, frame_size, canvas_size)
+        cards.append({
+            "card_type": det.card_type.value,
+            "class_id": ColorCardType.to_class_id(det.card_type),
+            "confidence": round(det.confidence, 4),
+            "color_confidence": round(det.color_confidence, 4),
+            "edge_confidence": round(det.edge_confidence, 4),
+            "pixel_center": list(det.center),
+            "canvas_center": list(canvas_pos),
+            "bbox": list(det.bbox),
+            "track_id": det.track_id,
+        })
+
+    return {
+        "type": "color_card_detections",
+        "count": len(cards),
+        "cards": cards,
+    }
 
 
 # ---------------------------------------------------------------------------
 # 工厂函数
 # ---------------------------------------------------------------------------
 
-def create_color_card_detector(model_path: Optional[str] = None,
-                               conf_threshold: float = 0.5,
-                               frame_size: Tuple[int, int] = (640, 480)) -> ColorCardDetector:
-    """工厂函数：创建颜色牌检测器"""
-    return ColorCardDetector(
-        model_path=model_path,
+def create_color_card_detector(
+    yolo_path: Optional[str] = None,
+    template_path: str = "vision/color_card_templates.npz",
+    device: str = "cpu",
+    conf_threshold: float = 0.5
+) -> DualColorCardDetector:
+    """工厂函数：创建双识别颜色牌检测器"""
+    return DualColorCardDetector(
+        yolo_path=yolo_path,
+        template_path=template_path,
+        device=device,
         conf_threshold=conf_threshold,
-        frame_size=frame_size,
     )
 
 
 # ---------------------------------------------------------------------------
-# 训练指引（模型就绪后删除此注释块）
+# 自测
 # ---------------------------------------------------------------------------
-#
-# 1. 采集数据
-#    python yolo/collect_data.py --output dataset/images/train --prefix color_card
-#
-# 2. 标注 (LabelImg / Label Studio)
-#    - 对每张图标注每张颜色牌的 bbox + class_id
-#    - 导出 YOLO txt 格式到 dataset/labels/train/
-#
-# 3. 训练
-#    python yolo/train_yolo.py
-#    (修改 train_yolo.py 中的 data= 指向 yolo/dataset.yaml)
-#
-# 4. 部署
-#    detector = ColorCardDetector(model_path="yolo/color_card.pt")
-# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import cv2
+
+    print("=" * 50)
+    print("颜色牌双识别器自测")
+    print("=" * 50)
+
+    # 检查模板状态
+    tmpl_path = "vision/color_card_templates.npz"
+    tmpl_mgr = TemplateManager(tmpl_path)
+
+    print(f"\n模板状态: {'已就绪' if tmpl_mgr.is_ready else '未就绪'}")
+    if not tmpl_mgr.is_ready:
+        missing = [ct.value for ct in ColorCardType.all_types()
+                   if not tmpl_mgr.has_template(ct)]
+        print(f"缺少模板: {missing}")
+        print("\n提示: 运行 collect_templates() 采集模板")
+    else:
+        print("所有 6 种颜色牌模板就绪")
+
+    # 尝试加载 YOLO
+    yolo_path = "yolo/color_card.pt"
+    detector = create_color_card_detector(
+        yolo_path=yolo_path if os.path.exists(yolo_path) else None,
+        template_path=tmpl_path
+    )
+
+    print(f"\nYOLO 模式: {'真实' if detector._yolo else 'Mock'}")
+    print(f"PiDiNet: {'已加载' if detector._pidinet else '待加载'}")
+
+    print("\n开启摄像头测试（按 Q 退出）...")
+    cap = cv2.VideoCapture(0)
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        detections = detector.detect(frame)
+
+        # 可视化
+        for det in detections:
+            x1, y1, w, h = det.bbox
+            x2, y2 = x1 + w, y1 + h
+
+            # 框
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+            # 标签
+            label = f"{det.card_type.value} {det.confidence:.2f}"
+            cv2.putText(frame, label, (x1, y1 - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+            # 置信度详情
+            detail = f"C:{det.color_confidence:.2f} E:{det.edge_confidence:.2f}"
+            cv2.putText(frame, detail, (x1, y2 + 20),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+
+        cv2.imshow("Color Card Detection", frame)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+    print("\n自测结束")

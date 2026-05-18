@@ -98,6 +98,10 @@ class IntegratedServer:
         self.current_color = "岳麓绿"  # 默认第一幕颜色
         self.selected_objects: List[str] = []
 
+        # 手部出现/消失检测（用于 Cover Flow）
+        self._prev_hand_detected = False
+        self._hand_appeared_sent = False  # 防止重复发送
+
     # ── 启动 ───────────────────────────────────────────────
 
     def start(self):
@@ -497,6 +501,19 @@ class IntegratedServer:
                         "fingertips": ft_flat,
                     })
 
+                # ── Cover Flow: 手首次出现在识别区 ──
+                if not self._prev_hand_detected and not self._hand_appeared_sent:
+                    gesture_name = self.fsm.current_gesture.value if self.fsm.current_gesture else "open_hand"
+                    self._send_main({
+                        "type": "hand_appeared",
+                        "palm_center": [palm_x, palm_y],
+                        "gesture": gesture_name,
+                    })
+                    self._hand_appeared_sent = True
+                    print(f"  [COVER_FLOW] hand_appeared sent! palm=({palm_x}, {palm_y})")
+
+                self._prev_hand_detected = True
+
                 # ── 可视化（仅在非 --no-display 模式） ──
                 if not self.no_display:
                     display = frame.copy()
@@ -521,6 +538,11 @@ class IntegratedServer:
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, u_color, 2)
             else:
                 self.fsm.process(None, ts)
+                # ── Cover Flow: 手消失在识别区 ──
+                if self._prev_hand_detected:
+                    self._prev_hand_detected = False
+                    self._hand_appeared_sent = False  # 重置，允许下次发送
+                    print("  [COVER_FLOW] hand_disappeared")
                 if not self.no_display:
                     display = frame.copy()
 

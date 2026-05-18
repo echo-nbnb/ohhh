@@ -144,10 +144,13 @@ YOLOv8n 实时检测（6 类颜色牌，BoT-SORT 跨帧跟踪）
 发送 Unity → 触发对应颜色的光圈绽放 + AI 旁白
 ```
 
-> **当前状态**: YOLO 接口已预留（`vision/color_card_detector.py`），mock 模式可跑通全链路。
-> 模型训练后放入权重文件即可切换真实检测。
+> **当前状态**: 颜色牌检测已升级为 **颜色+纹路双保险识别**。
+> - YOLOv8n 定位卡片区域
+> - HSV 颜色直方图匹配（辅助）
+> - PiDiNet 边缘检测 + 纹路模板匹配（核心）
+> - 融合权重：颜色 0.4 + 纹路 0.6
 >
-> 训练准备见 [`yolo/dataset.yaml`](yolo/dataset.yaml)（6 类颜色牌）。
+> 训练流程见下方 **训练教程** 章节。
 
 ### 物象识别管线（第二幕）
 
@@ -414,7 +417,7 @@ rag/knowledge/
 |------|--------|------|
 | 手势识别（MediaPipe） | 100% | 21 关键点追踪 + 手势分类 |
 | 手势状态机（FSM） | 100% | 5 模式切换 |
-| 颜色牌检测（YOLO） | 接口就绪 | `vision/color_card_detector.py` 已预留，待采集数据训练 |
+| 颜色牌检测（双识别） | ✅ 就绪 | 颜色+纹路双识别，需采集模板+训练 YOLO |
 | 物象识别管线（CNN+映射） | 100% | QuickDraw MobileNet + 88 物象 |
 | 人物推荐（RAG） | 100% | 160 人物检索 + LLM 排序 |
 | Python-Unity 通信 | 100% | 双端口 TCP + 延迟优化 |
@@ -425,6 +428,340 @@ rag/knowledge/
 | 声效 + 配音 | 0% | 待后续 |
 | 云端 API 接入 | 0% | 阿里云百炼（预留） |
 | **总体** | **~93%** | 技术侧主体完成，颜色牌待训练，艺术侧待推进 |
+
+---
+
+## 📚 训练教程
+
+> 本教程详细介绍颜色牌检测模型的训练流程。包括模板采集、YOLO 训练和部署。
+
+### 训练流程总览
+
+```
+阶段 1：采集模板（必做）→ 阶段 2：标注数据（YOLO定位用）→ 阶段 3：训练 → 阶段 4：部署验证
+```
+
+---
+
+### 阶段 1：采集模板（必做）
+
+模板用于**纹路识别**（PiDiNet 边缘匹配），每种颜色牌采集一次即可。
+
+#### 1.1 使用 IP 摄像头采集
+
+```bash
+python -c "
+from vision.ipcamera import IPCamera
+from vision.color_card_detector import collect_templates
+
+cam = IPCamera('http://你的摄像头IP:8080/video')
+cam.connect()
+collect_templates(lambda: cam.read_frame())
+"
+```
+
+#### 1.2 使用本地摄像头采集
+
+```bash
+python vision/color_card_detector.py
+```
+
+**操作说明**：
+| 按键 | 操作 |
+|------|------|
+| `SPACE` | 对准颜色牌按空格拍照（建议 3-5 张不同角度） |
+| `N` | 采集完毕，跳到下一种颜色牌 |
+| `Q` | 退出采集 |
+
+#### 1.3 采集顺序
+
+按以下顺序依次放置颜色牌拍照：
+1. 岳麓绿
+2. 书院红
+3. 西迁黄
+4. 湘江蓝
+5. 校徽金
+6. 墨色
+
+#### 1.4 采集要求
+
+- **光照**：尽量在展览现场同款灯光下采集（暗光环境）
+- **角度**：每种颜色牌拍 3-5 张，覆盖不同角度（正视、侧视、轻微倾斜）
+- **背景**：尽量包含展示台桌面的纹理，增加识别鲁棒性
+
+#### 1.5 输出
+
+采集完成后生成文件：`vision/color_card_templates.npz`
+
+---
+
+### 阶段 2：标注数据（YOLO 定位用）
+
+YOLO 用于**定位**颜色牌在画面中的区域，与纹路识别配合使用。
+
+#### 2.1 准备照片
+
+将颜色牌照片放入数据集目录：
+
+```
+dataset/
+└── images/
+    └── train/
+        ├── yuelu_green_001.jpg
+        ├── yuelu_green_002.jpg
+        ├── academy_red_001.jpg
+        └── ...
+```
+
+**建议数量**：每种颜色牌 30-50 张，涵盖不同光照、角度、背景。
+
+#### 2.2 安装标注工具
+
+```bash
+pip install labelImg
+```
+
+#### 2.3 开始标注
+
+```bash
+# 指定数据目录启动
+labelImg dataset/images/train
+```
+
+**标注设置**：
+- 点击 **Change Save Dir**，选择 `dataset/labels/train`（LabelImg 会自动生成同名 .txt 文件）
+- 点击 **View**，勾选 **Auto Save Mode**（切图时自动保存）
+- 格式选择 **YOLO**（右下角）
+
+#### 2.4 标注规范
+
+| 类别 | 标签名 | 说明 |
+|------|--------|------|
+| 0 | yuelu_green | 岳麓绿 |
+| 1 | academy_red | 书院红 |
+| 2 | xiqian_yellow | 西迁黄 |
+| 3 | xiangjiang_blue | 湘江蓝 |
+| 4 | badge_gold | 校徽金 |
+| 5 | ink_black | 墨色 |
+
+**标注要求**：
+- 紧贴颜色牌边缘，不留多余空白
+- 每张图只标一个颜色牌（如果有多个都标）
+- 确保标签与颜色牌类型匹配
+
+#### 2.5 目录结构（标注完成后）
+
+```
+dataset/
+├── images/
+│   └── train/
+│       ├── yuelu_green_001.jpg
+│       └── ...
+└── labels/
+    └── train/
+        ├── yuelu_green_001.txt  ← 自动生成
+        └── ...
+```
+
+---
+
+### 阶段 3：训练 YOLO
+
+#### 3.1 检查配置
+
+确认 `yolo/dataset.yaml` 内容正确：
+
+```yaml
+path: ../dataset
+train: images/train
+val: images/val
+
+nc: 6
+names:
+  0: yuelu_green     # 岳麓绿
+  1: academy_red      # 书院红
+  2: xiqian_yellow    # 西迁黄
+  3: xiangjiang_blue  # 湘江蓝
+  4: badge_gold       # 校徽金
+  5: ink_black        # 墨色
+```
+
+#### 3.2 开始训练
+
+```bash
+cd D:\projects\ohhh
+python yolo/train_yolo.py
+```
+
+**训练参数**（可在 `yolo/train_yolo.py` 中修改）：
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| epochs | 100 | 训练轮数，建议 50-100 |
+| imgsz | 640 | 输入图像尺寸 |
+| batch | 8 | 批大小，根据显存调整 |
+| device | 0 | GPU 编号，CPU 训练用 cpu |
+
+#### 3.3 训练输出
+
+训练完成后，模型保存在：
+```
+runs/detect/color_card_detector/weights/
+├── best.pt   ← 最佳模型（用于部署）
+└── last.pt   ← 最后一轮模型
+```
+
+#### 3.4 验证模型
+
+```python
+# 在 Python 中验证
+from ultralytics import YOLO
+model = YOLO('runs/detect/color_card_detector/weights/best.pt')
+metrics = model.val()
+print(f"mAP50: {metrics.box.map50:.3f}")
+```
+
+---
+
+### 阶段 4：部署与验证
+
+#### 4.1 部署模型
+
+将训练好的模型复制到指定位置：
+
+```bash
+# 复制 best.pt 为 color_card.pt
+copy runs\detect\color_card_detector\weights\best.pt yolo\color_card.pt
+```
+
+#### 4.2 验证检测
+
+```bash
+python vision/color_card_detector.py
+```
+
+应看到：
+- 摄像头画面
+- 检测框（绿色矩形）
+- 类别标签（如 `岳麓绿 0.92`）
+- 颜色/纹路置信度详情（如 `C:0.85 E:0.92`）
+
+#### 4.3 集成测试
+
+修改 `test_integrated.py` 中的检测器配置：
+
+```python
+from vision.color_card_detector import create_color_card_detector
+
+detector = create_color_card_detector(
+    yolo_path="yolo/color_card.pt",
+    template_path="vision/color_card_templates.npz"
+)
+```
+
+---
+
+### 常见问题
+
+#### Q1: 模板采集时报错 "PiDiNet 加载失败"
+
+PiDiNet 是备选方案，不影响模板采集。继续使用 Canny 边缘检测即可。
+
+#### Q2: YOLO 训练时显存不足
+
+降低 batch 大小：
+```python
+results = model.train(..., batch=4, ...)  # 从 8 降到 4
+```
+
+#### Q3: 检测准确率低
+
+1. **模板不足**：增加模板采集数量，每种颜色牌采集 5-10 张
+2. **标注数据少**：增加训练数据量，每种至少 50 张
+3. **光照差异大**：在展览现场同款灯光下采集模板
+
+#### Q4: 颜色和纹路识别结果不一致
+
+双保险融合策略：
+- **一致** → 高置信，返回加权平均
+- **不一致** → 优先纹路（权重更高 0.6），降低置信度
+
+---
+
+### 目录结构
+
+```
+D:\projects\ohhh\
+├── dataset/                        # YOLO 训练数据
+│   ├── images/
+│   │   └── train/                # 训练图片
+│   └── labels/
+│       └── train/                # YOLO .txt 标注
+│
+├── vision/
+│   ├── color_card_templates.npz  # ← 纹路模板（采集后生成）
+│   └── color_card_detector.py   # 双识别检测器
+│
+├── yolo/
+│   ├── color_card.pt             # ← YOLO 模型（训练后生成）
+│   ├── dataset.yaml              # 数据集配置
+│   └── train_yolo.py            # 训练脚本
+│
+└── runs/                         # 训练输出
+    └── detect/
+        └── color_card_detector/
+            └── weights/
+                ├── best.pt
+                └── last.pt
+```
+
+---
+
+### 技术细节：颜色+纹路双保险
+
+展览环境光照暗，**仅靠颜色识别不可靠**，采用双保险方案：
+
+```
+摄像头帧
+    │
+    ▼
+┌─────────────────┐
+│  YOLOv8n 检测     │  ← 定位颜色牌区域（bbox）
+│  (定位)          │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│   裁剪卡片区域    │
+└────────┬────────┘
+         │
+         ├────────────────────┐
+         │                     │
+         ▼                     ▼
+┌─────────────────┐   ┌─────────────────┐
+│   颜色识别器      │   │   纹路识别器      │
+│  HSV 直方图匹配  │   │ PiDiNet+模板匹配 │
+│  (辅助 0.4)     │   │  (核心 0.6)     │
+└────────┬────────┘   └────────┬────────┘
+         │                     │
+         └──────────┬──────────┘
+                    ▼
+            ┌───────────────┐
+            │   决策融合     │
+            │ color × 0.4   │
+            │  + edge × 0.6 │
+            └───────────────┘
+```
+
+**各颜色牌预期纹路特征**：
+
+| 颜色牌 | 纹路特征 |
+|--------|---------|
+| 岳麓绿 | 竖条纹/松针纹理 |
+| 书院红 | 横向砖纹/瓦片 |
+| 西迁黄 | 折线条纹/地图纹理 |
+| 湘江蓝 | 波浪纹理/水纹 |
+| 校徽金 | 光泽渐变/徽章边缘 |
+| 墨色 | 泼墨/浓淡渐变 |
 
 ---
 

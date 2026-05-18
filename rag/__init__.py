@@ -36,7 +36,9 @@ from .generator import (
     GenerationConfig,
     LocalGenerator,
     AliCloudGenerator as CloudGenerator,
-    create_generator
+    create_generator,
+    get_character_style,
+    CHARACTER_GROUP_STYLE,
 )
 
 __all__ = [
@@ -50,6 +52,8 @@ __all__ = [
     'NarrativeGenerator',
     'GenerationConfig',
     'create_generator',
+    'get_character_style',
+    'CHARACTER_GROUP_STYLE',
 ]
 
 

@@ -6,20 +6,27 @@ RAG 生成模块
 import json
 import os
 import base64
+import logging
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from urllib.parse import urlparse, unquote
 from pathlib import PurePosixPath
 
+logger = logging.getLogger("NarrativeGenerator")
+
 # 阿里云百炼 API
 try:
     import dashscope
     from dashscope import Generation, ImageSynthesis
+    from dashscope.aigc.image_generation import ImageGeneration
+    from dashscope.api_entities.dashscope_response import Message
     from http import HTTPStatus
     import requests
     DASHSCOPE_AVAILABLE = True
 except ImportError:
     DASHSCOPE_AVAILABLE = False
+    ImageGeneration = None  # type: ignore
+    Message = None  # type: ignore
     print("[警告] dashscope未安装，将使用占位符实现")
 
 
@@ -30,9 +37,9 @@ class GenerationConfig:
     api_key: str = ""  # 通过环境变量 DASHSCOPE_API_KEY 设置
 
     # 模型选择
-    realtime_model: str = "qwen-turbo"      # 实时侧用小模型（快）
-    narrative_model: str = "qwen-plus"      # 叙事卡用中等模型（质量）
-    image_model: str = "qwen-image-2.0-pro"  # 图像生成模型
+    realtime_model: str = "qwen-turbo-latest"   # 实时侧用 Turbo（快、便宜）
+    narrative_model: str = "qwen3-max"          # 叙事卡用 Qwen3 Max（最高质量）
+    image_model: str = "wan2.7-image-pro"       # 图像生成模型（Wan 2.7 支持文生图 + 图生图）
 
     # 生成参数
     max_tokens: int = 500
@@ -41,6 +48,111 @@ class GenerationConfig:
     # 图像参数
     image_size: str = "1024*1024"  # 默认分辨率
     image_n: int = 1               # 生成数量
+
+
+# ---------------------------------------------------------------------------
+# 人物 → 时代 → 视觉风格 映射表
+# 基于 character_recommend.py 的人物分组
+# 古人 → 古风 / 近现代 → 写实 / 跨时代 → 穿越风
+# ---------------------------------------------------------------------------
+CHARACTER_GROUP_STYLE = {
+    # 古代 → 古风 (传统水墨)
+    "理学脉络": {
+        "era": "古代",
+        "style": "古风",
+        "visual_prompt": (
+            "traditional Chinese ink wash painting, Song dynasty literati style, "
+            "elegant sparse brushwork, rice paper texture, calligraphic sensibility, "
+            "Zen aesthetics, misty mountains, subtle ink gradations, negative space composition"
+        ),
+    },
+    # 近代 → 写实 (历史纪实)
+    "湘军将帅": {
+        "era": "近代",
+        "style": "写实",
+        "visual_prompt": (
+            "historical realism, late Qing dynasty photography aesthetic, "
+            "sepia and earth tones, documentary gravitas, dramatic chiaroscuro lighting, "
+            "weathered textures, monumental composition"
+        ),
+    },
+    "维新革命": {
+        "era": "近代",
+        "style": "写实",
+        "visual_prompt": (
+            "revolutionary realism, early 20th century Chinese woodcut print style, "
+            "bold black and red contrasts, heroic composition, dynamic tension, "
+            "propaganda poster sensibility, stark shadows"
+        ),
+    },
+    # 现代 → 写实 (当代纪实)
+    "现代学人": {
+        "era": "现代",
+        "style": "写实",
+        "visual_prompt": (
+            "modern Chinese academic realism, soft natural lighting, "
+            "intellectual atmosphere, scholarly setting, warm muted tones, "
+            "contemporary documentary photography, thoughtful composition"
+        ),
+    },
+    "校园角色": {
+        "era": "现代",
+        "style": "写实",
+        "visual_prompt": (
+            "contemporary campus slice of life, warm sunlight through old trees, "
+            "natural candid photography, youthful nostalgic atmosphere, "
+            "modern Chinese aesthetic with classical undertones, soft focus edges"
+        ),
+    },
+    # 跨时代 → 穿越风 (古今融合)
+    "抽象意象": {
+        "era": "跨时代",
+        "style": "穿越风",
+        "visual_prompt": (
+            "surreal time-travel fusion, ancient ink painting dissolving into digital art, "
+            "double exposure technique, anachronistic elements in harmony, "
+            "dreamlike temporal blur, traditional motifs rendered in contemporary media, "
+            "past and present coexisting in one frame"
+        ),
+    },
+}
+
+# 人物名 → 分组 的懒加载索引
+_character_group_index: dict = {}
+
+
+def _build_character_group_index():
+    """构建 人物名→分组 索引"""
+    global _character_group_index
+    if _character_group_index:
+        return
+    for group_name, members in {
+        "理学脉络": ["周敦颐", "程颢", "程颐", "胡安国", "胡宏", "朱熹", "张栻", "吕祖谦",
+                     "陆九渊", "王阳明", "王夫之", "罗洪先"],
+        "湘军将帅": ["曾国藩", "左宗棠", "胡林翼", "彭玉麟"],
+        "维新革命": ["谭嗣同", "魏源", "黄兴", "蔡锷", "宋教仁", "陈天华"],
+        "现代学人": ["毛泽东", "杨昌济", "何叔衡", "李达", "成仿吾", "周谷城", "何长工",
+                     "熊十力", "冯友兰", "钱基博", "金岳霖", "梁漱溟", "胡庶华"],
+        "校园角色": ["学子", "教师", "研究者", "新生", "毕业生", "图书管理员", "古籍修复师",
+                     "志愿者", "讲解员", "辅导员", "留学生", "食堂师傅"],
+        "抽象意象": ["理学之魂", "书院守望者", "湘江行者", "知识火种者", "文化摆渡人",
+                     "思想叩问者", "未来开拓者"],
+    }.items():
+        for name in members:
+            _character_group_index[name] = group_name
+
+
+def get_character_style(character_name: str) -> dict:
+    """
+    根据人物名获取视觉风格
+
+    Returns:
+        {"era": "古代", "style": "古风", "visual_prompt": "..."}
+        未匹配时返回默认现代写实风格
+    """
+    _build_character_group_index()
+    group = _character_group_index.get(character_name, "校园角色")
+    return CHARACTER_GROUP_STYLE.get(group, CHARACTER_GROUP_STYLE["校园角色"])
 
 
 class AliCloudGenerator:
@@ -82,7 +194,13 @@ class AliCloudGenerator:
                 result_format='message'
             )
             if response.status_code == 200:
-                return response.output.text
+                # output.text 可能为 None，优先从 choices[0].message.content 读取
+                if (hasattr(response.output, 'choices')
+                        and response.output.choices
+                        and hasattr(response.output.choices[0], 'message')
+                        and hasattr(response.output.choices[0].message, 'content')):
+                    return response.output.choices[0].message.content
+                return response.output.text or ""
             else:
                 print(f"[错误] API调用失败: {response.message}")
                 return ""
@@ -204,6 +322,83 @@ class AliCloudGenerator:
             temperature=0.7
         )
 
+    def _build_narrative_facts(self, modules: List[Dict], connections: List[Dict]) -> str:
+        """
+        从 modules 和 connections 中提取知识库关键事实，
+        供 Few-shot ICL 示例和 Hallucination 约束使用。
+        """
+        lines = []
+        for m in modules:
+            entity = m.get("entity", "")
+            kind = m.get("type", "")
+            desc = m.get("description", "")
+            symbol = m.get("symbolism", "")
+            hist = m.get("historical_context", "")
+            era = m.get("era", "")
+            mood = m.get("mood", "")
+
+            fact_parts = [f"{entity}（{kind}）"]
+            if desc:
+                fact_parts.append(f"描述：{desc}")
+            if symbol:
+                fact_parts.append(f"象征意义：{symbol}")
+            if hist:
+                fact_parts.append(f"历史背景：{hist}")
+            if era:
+                fact_parts.append(f"所属时代：{era}")
+            if mood:
+                fact_parts.append(f"情感基调：{mood}")
+            lines.append(" | ".join(fact_parts))
+
+        for c in connections:
+            from_e = c.get("from", "")
+            to_e = c.get("to", "")
+            meaning = c.get("meaning", "")
+            if from_e and to_e and meaning:
+                lines.append(f"连接「{from_e}」与「{to_e}」：{meaning}")
+
+        return "\n".join(lines) if lines else "（知识库暂无详细记录）"
+
+    def _verify_hallucination(self, narrative_result: Dict,
+                              modules: List[Dict],
+                              connections: List[Dict]) -> List[str]:
+        """
+        校验叙事内容是否存在幻觉（幻觉的内容来自用户输入，不在知识库中）。
+
+        检查策略：从叙事中提取人名/年代/地点，与知识库做字符串匹配。
+        匹配失败的条目记录为"潜在幻觉"。
+
+        Returns:
+            潜在幻觉描述列表（空列表表示通过校验）
+        """
+        warnings = []
+
+        # 提取知识库中的实体名称集
+        known_names = set()
+        for m in modules:
+            for key in ["entity", "name"]:
+                val = m.get(key, "").strip()
+                if val:
+                    known_names.add(val)
+
+        # 合并 connections 中的实体
+        for c in connections:
+            for key in ["from", "to"]:
+                val = c.get(key, "").strip()
+                if val:
+                    known_names.add(val)
+
+        # 从段落文本中简单抽取"疑似人名"（2-4字且非颜色/物象名的词）
+        text_blob = "".join(narrative_result.get("paragraphs", []))
+        # 粗筛：长度2-4的连续汉字串
+        import re
+        suspected_names = re.findall(r"[一-鿿]{2,4}", text_blob)
+        for name in suspected_names:
+            if name not in known_names and name not in ["湖大", "岳麓", "湘江", "书院"]:
+                warnings.append(f"未识别实体「{name}」，请确认是否捏造")
+
+        return warnings
+
     def generate_narrative(self, context: Dict) -> Dict:
         """
         生成完整叙事（用于叙事卡）
@@ -220,11 +415,15 @@ class AliCloudGenerator:
             {
                 "title": "...",
                 "paragraphs": ["第一段", "第二段", ...],
-                "summary": "..."
+                "summary": "...",
+                "hallucination_warnings": [...]  # 潜在幻觉提示（供调试/人工审核）
             }
         """
         modules = context.get("modules", [])
         connections = context.get("connections", [])
+
+        # 构建知识库事实（用于 ICL 示例 + Hallucination 约束）
+        facts_text = self._build_narrative_facts(modules, connections)
 
         # 构建模块列表描述
         module_list = "\n".join([
@@ -238,7 +437,31 @@ class AliCloudGenerator:
             for c in connections
         ]) if connections else "无"
 
+        # Few-shot ICL 示例（1 对）
+        few_shot_example = """示例：
+输入：
+- 岳麓绿（颜色）：岳麓书院的苍松翠柏，象征理学文脉的生生不息
+- 书院（物象）：千年学府，湖湘文化的精神源地
+- 朱熹（人物）：南宋理学家，曾主讲岳麓书院，推动湘学发展
+连接「岳麓绿」与「书院」：绿意映衬下的书院，理学精神薪火相传
+
+输出格式（JSON）：
+{
+    "title": "岳麓松风",
+    "paragraphs": [
+        "我站在岳麓书院的石阶前，眼前是一片苍翠欲滴的绿。这绿不同于别处，它承载着千年理学的文脉，</n>仿佛朱熹当年讲学时的那片松林依然在这里守望。",
+        "书院的青瓦白墙在绿荫掩映下愈显古朴。我仿佛听见远山的钟声穿过松涛，</n>那是跨越千年的呼唤——从周敦颐的太极到朱熹的注解，理学在此一脉相承。",
+        "我伸手触碰石柱上的苔痕，凉意沁入掌心。这绿不仅是颜色，更是湖湘士人的精神底色——</n>「诚朴」二字，在这一片苍翠中悄然浮现。",
+        "当湘江的水汽随风送来，我感到自己已与这座书院融为一体。</n>我是过客，亦是归人；我寻色，亦在寻根。",
+        "最终，我将这一抹岳麓绿收入心底，作为湖大千年色最深的印记：</n>它不仅是自然之色，更是理学之魂在此地的永驻。"
+    ],
+    "summary": "岳麓松风，绿染千年，理学文脉在此生生不息。"
+}"""
+
         prompt = f"""你是一个湖湘文化叙事作家。请根据以下元素组合，生成一段个性化的湖大千年色叙事。
+
+【知识库事实】（你必须严格基于以下事实创作，不得捏造任何不在此列的人物、年代、事件）
+{facts_text}
 
 【用户选择的元素】
 {module_list}
@@ -248,9 +471,12 @@ class AliCloudGenerator:
 
 【叙事主题】你寻到的千年色
 
+{few_shot_example}
+
 要求：
 - 4-5段文字，娓娓道来
 - 从"我"的角度叙述，有代入感
+- 必须严格基于【知识库事实】中的内容创作，**不得捏造**未列出的人名、历史事件或象征意义
 - 融入湖湘文化和湖大历史
 - 每段2-3句话
 - 最后一段呼应主题，升华情感
@@ -274,7 +500,8 @@ class AliCloudGenerator:
             return {
                 "title": "你寻到的千年色",
                 "paragraphs": ["[生成失败，请稍后重试]"],
-                "summary": ""
+                "summary": "",
+                "hallucination_warnings": []
             }
 
         # 尝试解析JSON
@@ -289,13 +516,19 @@ class AliCloudGenerator:
                 end = result.find("```", start)
                 result = result[start:end]
 
-            return json.loads(result)
+            parsed = json.loads(result)
+            # Hallucination 校验
+            parsed["hallucination_warnings"] = self._verify_hallucination(
+                parsed, modules, connections
+            )
+            return parsed
         except json.JSONDecodeError:
             # 解析失败，返回原始文本
             return {
                 "title": "你寻到的千年色",
                 "paragraphs": [result],
-                "summary": ""
+                "summary": "",
+                "hallucination_warnings": []
             }
 
     def generate_image_prompt(self, context: Dict) -> str:
@@ -332,94 +565,174 @@ class AliCloudGenerator:
             temperature=0.7
         )
 
-    def generate_image(self, prompt: str, size: str = None, n: int = 1) -> Dict:
+    # ------------------------------------------------------------------
+    # Wan 2.7 图像生成（异步：提交任务 → 轮询等待 → 下载结果）
+    # ------------------------------------------------------------------
+
+    def _generate_image_wan(self, prompt: str, size: str = None, n: int = 1,
+                            base_image: str = None) -> Dict:
         """
-        调用千问图像生成模型生成图像
+        Wan 2.7 异步图像生成（文生图 / 图生图）
 
         Args:
             prompt: 图像提示词（英文）
-            size: 分辨率，如 "1024*1024"
+            size: 分辨率，如 "2048*2048"
             n: 生成数量
+            base_image: 可选，底图 Base64 或 URL。传入则走图生图模式
 
         Returns:
-            {
-                "status": "success" / "error",
-                "image_url": "https://...",        # URL，仅24小时有效
-                "local_path": "./xxx.png",          # 本地路径
-                "base64": "data:image/png;base64,...",  # Base64
-                "error": "错误信息"
-            }
+            {"status": "success"/"error", "images": [...], "error": "..."}
         """
-        if not DASHSCOPE_AVAILABLE:
-            return {
-                "status": "error",
-                "error": "dashscope未安装"
-            }
+        if not DASHSCOPE_AVAILABLE or ImageGeneration is None:
+            return {"status": "error", "error": "dashscope 未安装"}
 
         if not self.config.api_key:
-            return {
-                "status": "error",
-                "error": "未配置API_KEY"
-            }
+            return {"status": "error", "error": "未配置 API_KEY"}
 
         size = size or self.config.image_size
         n = n or self.config.image_n
 
         try:
-            response = ImageSynthesis.call(
-                api_key=self.config.api_key,
+            # 构建消息内容
+            content = []
+            if base_image:
+                content.append({"image": base_image})
+            content.append({"text": prompt})
+
+            message = Message(role="user", content=content)
+
+            # 提交异步任务
+            logger.info(f"[Wan] 提交{'图生图' if base_image else '文生图'}任务...")
+            response = ImageGeneration.async_call(
                 model=self.config.image_model,
-                prompt=prompt,
-                size=size,
+                api_key=self.config.api_key,
+                messages=[message],
                 n=n,
-                prompt_extend=True,  # 开启提示词优化
-                watermark=False,
-                negative_prompt="低分辨率，低画质，肢体畸形，手指畸形，画面过饱和，蜡像感，人脸无细节，过度光滑，画面具有AI感。构图混乱。文字模糊，扭曲。",
+                size=size,
             )
 
-            if response.status_code == HTTPStatus.OK:
-                results = []
-                for result in response.output.results:
-                    image_url = result.url
-
-                    # 下载图像
-                    local_path, _ = self._download_image(image_url)
-                    base64_str = None
-                    if local_path:
-                        base64_str = self._encode_image_to_base64(local_path)
-
-                    results.append({
-                        "image_url": image_url,
-                        "local_path": local_path,
-                        "base64": base64_str
-                    })
-
-                return {
-                    "status": "success",
-                    "images": results
-                }
-            else:
+            if response.status_code != 200:
                 return {
                     "status": "error",
-                    "error": f"API调用失败: {response.message}"
+                    "error": f"任务提交失败: {response.code} - {response.message}"
                 }
-        except Exception as e:
-            return {
-                "status": "error",
-                "error": f"图像生成异常: {str(e)}"
-            }
 
-    def generate_image_sync(self, prompt: str, size: str = None) -> Dict:
+            task_id = response.output.task_id
+            logger.info(f"[Wan] 任务已提交, task_id={task_id}")
+
+            # 轮询等待任务完成（最长等待 2 分钟）
+            result = ImageGeneration.wait(task=response, api_key=self.config.api_key)
+            logger.info(f"[Wan] 任务完成, status={result.output.task_status}")
+
+            if result.output.task_status == "SUCCEEDED":
+                logger.info(f"[Wan] choices count: {len(result.output.choices)}")
+                images = []
+                for choice in result.output.choices:
+                    for content_item in choice.message.content:
+                        # content_item may be dict or object
+                        if isinstance(content_item, dict):
+                            image_url = content_item.get("image", "")
+                        elif hasattr(content_item, 'image'):
+                            image_url = content_item.image or ""
+                        else:
+                            logger.warning(f"[Wan] unknown content_item type: {type(content_item)}")
+                            continue
+
+                        if image_url:
+                            local_path, _ = self._download_image(image_url)
+                            base64_str = None
+                            if local_path:
+                                base64_str = self._encode_image_to_base64(local_path)
+                            images.append({
+                                "image_url": image_url,
+                                "local_path": local_path,
+                                "base64": base64_str,
+                            })
+
+                logger.info(f"[Wan] 生成完成, 共 {len(images)} 张")
+                return {"status": "success", "images": images}
+            else:
+                # 尝试从 result 中获取更多错误信息
+                err_msg = str(result.output.task_status)
+                if hasattr(result, 'code') and result.code:
+                    err_msg += f" | code={result.code}"
+                if hasattr(result, 'message') and result.message:
+                    err_msg += f" | message={result.message}"
+                return {
+                    "status": "error",
+                    "error": f"任务失败: {err_msg}"
+                }
+
+        except Exception as e:
+            logger.error(f"[Wan] 图像生成异常: {e}")
+            return {"status": "error", "error": f"图像生成异常: {str(e)}"}
+
+    def generate_image(self, prompt: str, size: str = None, n: int = 1) -> Dict:
         """
-        同步调用千问图像生成（同步接口，阻塞等待）
+        图像生成（Wan 2.7 异步，文生图）
 
         Args:
             prompt: 图像提示词（英文）
-            size: 分辨率
+            size: 分辨率，默认 "2048*2048"
+            n: 生成数量
 
         Returns:
-            同generate_image
+            {"status": "success"/"error", "images": [...], "error": "..."}
         """
+        return self._generate_image_wan(prompt, size, n)
+
+    def generate_image_with_base(self, prompt: str, base_image: str,
+                                  size: str = None) -> Dict:
+        """
+        图生图：基于底图 + 风格 prompt 生成新图像
+
+        颜色晕染底图（Unity 前端提供）+ 人物风格 prompt → 融合图像
+
+        Args:
+            prompt: 风格提示词（英文，由人物视觉风格决定）
+            base_image: 底图 Base64 字符串（data:image/png;base64,...）或 URL
+            size: 分辨率，默认 "2048*2048"
+
+        Returns:
+            同 generate_image
+        """
+        return self._generate_image_wan(prompt, size, n=1, base_image=base_image)
+
+    # ------------------------------------------------------------------
+    # 人物风格 prompt 生成
+    # ------------------------------------------------------------------
+
+    def build_character_style_prompt(self, character_name: str,
+                                      color_name: str = "",
+                                      base_prompt: str = "") -> str:
+        """
+        根据人物 + 颜色构建图生图的风格 prompt
+
+        Args:
+            character_name: 人物名（如 "朱熹", "毛泽东"）
+            color_name: 颜色名（如 "岳麓绿", "书院红"）
+            base_prompt: 基础场景 prompt（可选，来自 generate_image_prompt）
+
+        Returns:
+            英文风格 prompt
+        """
+        style = get_character_style(character_name)
+        visual = style["visual_prompt"]
+
+        parts = [visual]
+
+        if color_name:
+            parts.append(f"dominant color atmosphere inspired by {color_name}")
+
+        if base_prompt:
+            parts.append(f"scene: {base_prompt[:200]}")
+
+        parts.append("high quality, artistic, museum exhibition grade")
+
+        return ", ".join(parts)
+
+    def generate_image_sync(self, prompt: str, size: str = None) -> Dict:
+        """同步生成（封装异步调用，阻塞等待）"""
         return self.generate_image(prompt, size, n=1)
 
 
@@ -530,16 +843,49 @@ class NarrativeGenerator:
 
     def generate_image(self, prompt: str, size: str = None) -> Dict:
         """
-        生成图像
+        文生图（Wan 2.7 异步）
 
         Args:
-            prompt: 图像提示词
+            prompt: 图像提示词（英文）
             size: 分辨率
 
         Returns:
             图像结果字典
         """
         return self.ali_gen.generate_image(prompt, size)
+
+    def generate_image_with_base(self, prompt: str, base_image: str,
+                                  size: str = None) -> Dict:
+        """
+        图生图：颜色晕染底图 + 人物风格 prompt → 融合图像
+
+        Args:
+            prompt: 风格提示词（英文）
+            base_image: 底图 Base64 或 URL（Unity 前端提供颜色晕染图）
+            size: 分辨率
+
+        Returns:
+            图像结果字典
+        """
+        return self.ali_gen.generate_image_with_base(prompt, base_image, size)
+
+    def build_character_style_prompt(self, character_name: str,
+                                      color_name: str = "",
+                                      base_prompt: str = "") -> str:
+        """
+        根据人物 + 颜色构建图生图风格 prompt
+
+        Args:
+            character_name: 人物名
+            color_name: 颜色名
+            base_prompt: 基础场景 prompt
+
+        Returns:
+            英文风格 prompt
+        """
+        return self.ali_gen.build_character_style_prompt(
+            character_name, color_name, base_prompt
+        )
 
 
 def create_generator(config: GenerationConfig = None) -> NarrativeGenerator:
