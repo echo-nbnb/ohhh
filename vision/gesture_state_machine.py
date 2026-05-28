@@ -3,6 +3,7 @@
 支持交互文档 interaction.md §2.2 定义的全体手势模式
 
 模式层级:
+    COLOR_EXTRACTION ← 颜色提取（第一幕，物件/衣物颜色识别）
     GLOBAL          ← 全局（握拳晕染、张手停止）
     DRAWING         ← 绘画（第二幕，食指伸出画画）
     CANDIDATE       ← 候选物象确认（第二幕，悬停+握拳确认）
@@ -28,6 +29,7 @@ logger = logging.getLogger("GestureFSM")
 
 
 class GestureMode(Enum):
+    COLOR_EXTRACTION = "COLOR_EXTRACTION"
     GLOBAL = "GLOBAL"
     DRAWING = "DRAWING"
     CANDIDATE = "CANDIDATE"
@@ -41,6 +43,16 @@ class GestureType(Enum):
     FIST = "fist"
     OPEN_HAND = "open_hand"
     UNKNOWN = "unknown"
+
+
+class ColorExtractionSubState(Enum):
+    """第一幕颜色提取子状态"""
+    AWAITING_OBJECT = "awaiting_object"      # 等待用户放置物件
+    OBJECT_ANALYZING = "object_analyzing"    # 分析物件颜色中
+    OBJECT_CONFIRMING = "object_confirming"  # 等待用户握拳确认
+    CLOTHING_FALLBACK = "clothing_fallback"  # 物件匹配失败，分析衣物颜色
+    CLOTHING_CONFIRMING = "clothing_confirming"  # 等待衣物颜色确认
+    CONFIRMED = "confirmed"                  # 择色完成
 
 
 class DrawingSubState(Enum):
@@ -83,7 +95,8 @@ class GestureStateMachine:
 
     def __init__(self):
         # 当前模式
-        self.mode: GestureMode = GestureMode.GLOBAL
+        self.mode: GestureMode = GestureMode.COLOR_EXTRACTION  # 默认从颜色提取开始
+        self.color_extraction_sub: ColorExtractionSubState = ColorExtractionSubState.AWAITING_OBJECT
         self.drawing_sub: DrawingSubState = DrawingSubState.IDLE
         self.candidate_sub: CandidateSubState = CandidateSubState.BROWSING
         self.recommend_sub: CharRecommendSubState = CharRecommendSubState.BROWSING
@@ -108,6 +121,10 @@ class GestureStateMachine:
 
         # 回调
         self.on_mode_change: Optional[Callable[[str, str, str], None]] = None
+        self.on_color_extraction_start: Optional[Callable] = None
+        self.on_object_color_detected: Optional[Callable] = None
+        self.on_clothing_fallback: Optional[Callable] = None
+        self.on_color_confirmed: Optional[Callable] = None
         self.on_drawing_start: Optional[Callable] = None
         self.on_drawing_commit: Optional[Callable[[List[Tuple[float, float, int]]], None]] = None
         self.on_drawing_cancel: Optional[Callable] = None
@@ -156,7 +173,10 @@ class GestureStateMachine:
 
         # ── 模式切换 ──────────────────────────
 
-        if self.mode == GestureMode.GLOBAL:
+        if self.mode == GestureMode.COLOR_EXTRACTION:
+            self._process_color_extraction(gesture_changed)
+
+        elif self.mode == GestureMode.GLOBAL:
             self._process_global(gesture_changed, landmarks, timestamp_ms)
 
         elif self.mode == GestureMode.DRAWING:
@@ -174,6 +194,40 @@ class GestureStateMachine:
     # ------------------------------------------------------------------
     # 各模式处理
     # ------------------------------------------------------------------
+
+    def _process_color_extraction(self, gesture_changed: bool):
+        """第一幕颜色提取状态处理"""
+        if gesture_changed:
+            if self.current_gesture == GestureType.FIST:
+                # 握拳确认
+                if self.color_extraction_sub == ColorExtractionSubState.OBJECT_CONFIRMING:
+                    # 确认物件颜色
+                    self.color_extraction_sub = ColorExtractionSubState.CONFIRMED
+                    self._transition_to(GestureMode.GLOBAL, "IDLE")
+                    if self.on_color_confirmed:
+                        self.on_color_confirmed()
+                elif self.color_extraction_sub == ColorExtractionSubState.CLOTHING_CONFIRMING:
+                    # 确认衣物颜色
+                    self.color_extraction_sub = ColorExtractionSubState.CONFIRMED
+                    self._transition_to(GestureMode.GLOBAL, "IDLE")
+                    if self.on_color_confirmed:
+                        self.on_color_confirmed()
+                elif self.color_extraction_sub == ColorExtractionSubState.AWAITING_OBJECT:
+                    # 等待中握拳 → 开始分析物件
+                    self.color_extraction_sub = ColorExtractionSubState.OBJECT_ANALYZING
+                    self._notify_mode_change("OBJECT_ANALYZING")
+                    if self.on_object_color_detected:
+                        self.on_object_color_detected()
+
+            elif self.current_gesture == GestureType.OPEN_HAND:
+                # 张手取消
+                if self.color_extraction_sub in (
+                    ColorExtractionSubState.OBJECT_CONFIRMING,
+                    ColorExtractionSubState.CLOTHING_CONFIRMING
+                ):
+                    # 重新开始
+                    self.color_extraction_sub = ColorExtractionSubState.AWAITING_OBJECT
+                    self._notify_mode_change("AWAITING_OBJECT")
 
     def _process_global(self, gesture_changed: bool, landmarks: List, ts_ms: int):
         if gesture_changed and self.current_gesture == GestureType.INDEX_POINTING:
@@ -291,6 +345,56 @@ class GestureStateMachine:
         self._transition_to(GestureMode.GLOBAL, "IDLE")
         self.trajectory.clear()
 
+    # ── 颜色提取状态触发 ─────────────────────────────────────────
+
+    def trigger_color_extraction_start(self):
+        """外部触发：开始颜色提取（开场后调用）"""
+        self._transition_to(GestureMode.COLOR_EXTRACTION, "AWAITING_OBJECT")
+        self.color_extraction_sub = ColorExtractionSubState.AWAITING_OBJECT
+        if self.on_color_extraction_start:
+            self.on_color_extraction_start()
+
+    def trigger_object_color_detected(self, matched: bool):
+        """
+        外部触发：物件颜色检测完成
+
+        Args:
+            matched: 是否匹配成功
+        """
+        if matched:
+            self.color_extraction_sub = ColorExtractionSubState.OBJECT_CONFIRMING
+            self._notify_mode_change("OBJECT_CONFIRMING")
+        else:
+            # 物件不匹配，触发衣物兜底
+            self.color_extraction_sub = ColorExtractionSubState.CLOTHING_FALLBACK
+            self._notify_mode_change("CLOTHING_FALLBACK")
+            if self.on_clothing_fallback:
+                self.on_clothing_fallback()
+
+    def trigger_clothing_color_detected(self, matched: bool):
+        """
+        外部触发：衣物颜色检测完成
+
+        Args:
+            matched: 是否匹配成功
+        """
+        if matched:
+            self.color_extraction_sub = ColorExtractionSubState.CLOTHING_CONFIRMING
+            self._notify_mode_change("CLOTHING_CONFIRMING")
+        else:
+            # 衣物也不匹配，使用默认墨色
+            self.color_extraction_sub = ColorExtractionSubState.CONFIRMED
+            self._transition_to(GestureMode.GLOBAL, "IDLE")
+            if self.on_color_confirmed:
+                self.on_color_confirmed()
+
+    def trigger_color_confirmed(self):
+        """外部触发：颜色确认完成，进入第二幕"""
+        self.color_extraction_sub = ColorExtractionSubState.CONFIRMED
+        self._transition_to(GestureMode.GLOBAL, "IDLE")
+        if self.on_color_confirmed:
+            self.on_color_confirmed()
+
     # ------------------------------------------------------------------
     # 手势识别
     # ------------------------------------------------------------------
@@ -349,7 +453,9 @@ class GestureStateMachine:
 
     @property
     def sub_state(self) -> str:
-        if self.mode == GestureMode.DRAWING:
+        if self.mode == GestureMode.COLOR_EXTRACTION:
+            return self.color_extraction_sub.value
+        elif self.mode == GestureMode.DRAWING:
             return self.drawing_sub.value
         elif self.mode == GestureMode.CANDIDATE:
             return self.candidate_sub.value

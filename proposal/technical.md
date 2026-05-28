@@ -55,9 +55,9 @@
 **数据流**：摄像头帧 → 颜色提取（物件主色+衣物颜色）+ 手部追踪 → 手势状态机 → 草图识别/人物推荐 → RAG 叙事生成 → 双端口 TCP → Unity 渲染
 
 > **技术实现路径**：
-> - 物件颜色提取：`vision/color_detector.py`（重构自color_card_detector.py，**未实现**）
-> - 衣物颜色提取：`vision/body_color_detector.py`（新建，**未实现**）
-> - 手势状态机扩展：`vision/gesture_state_machine.py`（新增COLOR_EXTRACTION模式，**未实现**）
+> - 物件颜色提取：`vision/color_detector.py`（重构自color_card_detector.py，**✅ 已实现**）
+> - 衣物颜色提取：`vision/webcam_color_detector.py`（电脑端摄像头，**✅ 已实现**，支持 simple/pose/selfie 三种方法）
+> - 手势状态机扩展：`vision/gesture_state_machine.py`（新增COLOR_EXTRACTION模式，**✅ 已实现**）
 
 ---
 
@@ -80,7 +80,7 @@
 │   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
 │   │ 颜色提取         │  │ MediaPipe        │  │ QuickDraw CNN    │ │
 │   │ (物件+衣物)     │  │ 21关键点 / 30fps │  │ 82类 / ONNX     │ │
-│   │ 🔸未实现        │  │                  │  │                  │ │
+│   │ ✅已实现        │  │                  │  │                  │ │
 │   └────────┬────────┘  └────────┬────────┘  └────────┬────────┘ │
 └────────────┼───────────────────┼───────────────────┼─────────────┘
              │                   │                   │
@@ -90,7 +90,7 @@
 │   ┌─────────────────────────────────────────────────────────────┐   │
 │   │                    Bridge 层                                │   │
 │   │   ColorDetectorBridge │  SketchBridge  │  CharacterBridge   │   │
-│   │   🔸未实现           │               │                   │   │
+│   │   ✅已实现           │               │                   │   │
 │   └─────────────────────────────────────────────────────────────┘   │
 │                                 │                                   │
 │   ┌─────────────────────────────┴─────────────────────────────┐   │
@@ -116,7 +116,7 @@
 **要点 1：视觉感知**
 - 摄像头俯拍，系统主动提取用户底色
 - 物件颜色提取：HSV主色分析，匹配六色基调（物件优先）
-- 衣物颜色兜底：MediaPipe人体分割，统计衣服颜色分布（**🔸 未实现**）
+- 衣物颜色兜底：MediaPipe人体分割，统计衣服颜色分布（**✅ 已实现**，支持 simple/pose/selfie 三种方法）
 - MediaPipe 追踪 21 个手部关键点，识别握拳/张手/食指伸出
 
 **要点 2：意图理解**
@@ -154,7 +154,7 @@
                               ColorDetectorBridge ────→ [光圈绽放]
                                     │              │
                                     │         [衣物颜色提取]
-                                    │         🔸未实现
+                                    │         ✅已实现
                                     ▼              ▼
                               Bridge Layer ─────────────────→ [颜色基调建立]
 
@@ -251,7 +251,7 @@
 **标题**：数据路径——信息如何在各模块间流动
 
 **阶段 1：选择流动**
-- 底色：物件HSV主色 → 六色匹配（失败则衣物颜色兜底）→ Unity光圈绽放 🔸未实现
+- 底色：物件HSV主色 → 六色匹配（失败则衣物颜色兜底）→ Unity光圈绽放 ✅已实现
 - 物象：指尖轨迹 → CNN 分类 → 颜色加权 → 直接识别结果（用户握拳确认）
 
 **阶段 2：确认流动**
@@ -302,10 +302,10 @@
 ```
 
 **PPT 要点**：
-- **物件颜色提取**：HSV颜色直方图分析主色调，匹配六色基调 🔸未实现
-- **衣物颜色提取**：MediaPipe人体分割 → 躯干区域颜色统计 → 六色匹配 🔸未实现
+- **物件颜色提取**：HSV颜色直方图分析主色调，匹配六色基调 ✅已实现
+- **衣物颜色提取**：MediaPipe人体分割 → 躯干区域颜色统计 → 六色匹配 ✅已实现（三种方法：simple/pose/selfie）
 - **兜底策略**：物件优先，失败则衣物，均失败则默认墨色
-- **文件**：`vision/color_detector.py`（物件颜色，重构自color_card_detector.py）/`vision/body_color_detector.py`（衣物颜色，新建）
+- **文件**：`vision/color_detector.py`（物件颜色）/ `vision/webcam_color_detector.py`（衣物颜色，三种检测方法）
 
 #### 3.1.2 手势识别技术
 
@@ -632,11 +632,11 @@ Scene Setup (一键创建)
 ```
 D:\projects\ohhh\
 ├── vision/                          # 视觉输入
-│   ├── color_detector.py            # 颜色提取器（物件主色，🔸未实现）
-│   ├── body_color_detector.py       # 衣物颜色提取（🔸未实现）
+│   ├── color_detector.py            # 颜色提取器（物件主色，✅已实现）
+│   ├── webcam_color_detector.py     # 衣物颜色提取（电脑端摄像头，✅已实现）
 │   ├── hand_detector.py             # MediaPipe 手部检测
 │   ├── hand_tracker.py              # 手部追踪封装
-│   ├── gesture_state_machine.py     # 6 模式手势 FSM（🔸未实现）
+│   ├── gesture_state_machine.py     # 6 模式手势 FSM（含COLOR_EXTRACTION，✅已实现）
 │   ├── sketch_recognizer.py        # QuickDraw CNN 草图识别
 │   └── quickdraw/                   # CNN 训练/数据/模型
 │       ├── model.py                 # MobileNet 模型定义
@@ -667,7 +667,7 @@ D:\projects\ohhh\
 
 | 层级 | 技术选型 | 版本/规格 |
 |------|---------|----------|
-| 视觉检测 | HSV颜色分析 + MediaPipe人体分割 | 🔸物件+衣物颜色提取，未实现 |
+| 视觉检测 | HSV颜色分析 + MediaPipe人体分割 | ✅物件+衣物颜色提取，已实现 |
 | 草图识别 | QuickDraw MobileNet ONNX | 82 类 / ~635K 参数 / 83.8% acc |
 | 手势追踪 | MediaPipe Hand Landmarker | 21 关键点 / 30fps |
 | LLM 生成 | 阿里云百炼 qwen-plus | qwen-turbo(实时) / qwen-plus(叙事) |
@@ -690,9 +690,9 @@ D:\projects\ohhh\
 摄像头帧 (640×480)
       │
       ├── 物件颜色提取 ────────────────────┐
-      │  🔸未实现                          │
+      │  ✅已实现                          │
       │  物件区域检测（颜色统计）            │ 衣物颜色提取
-      │  HSV主色提取                        │ 🔸未实现
+      │  HSV主色提取                        │ ✅已实现
       │  六色基调匹配                       │ MediaPipe人体分割
       │                                    │ 躯干区域颜色统计
       │                                    │ 六色基调匹配
@@ -710,11 +710,28 @@ D:\projects\ohhh\
 | 项目 | 内容 |
 |------|------|
 | **检测目标** | 6 类：岳麓绿 / 书院红 / 西迁黄 / 湘江蓝 / 校徽金 / 墨色 |
-| **物件颜色** | HSV颜色直方图主色提取 → 六色基调匹配 🔸未实现 |
-| **衣物颜色** | MediaPipe人体分割 → 躯干颜色统计 → 六色匹配 🔸未实现 |
+| **物件颜色** | HSV颜色直方图主色提取 → 六色基调匹配 ✅已实现 |
+| **衣物颜色** | MediaPipe人体分割 → 躯干颜色统计 → 六色匹配 ✅已实现（三种方法） |
 | **兜底策略** | 物件优先，失败则衣物，均失败则默认墨色 |
 | **输出** | color_type、source、confidence、fallback_triggered |
-| **文件** | `vision/color_detector.py`（物件颜色，重构自color_card_detector.py）/ `vision/body_color_detector.py`（衣物颜色，新建） |
+| **文件** | `vision/color_detector.py`（物件颜色）/ `vision/webcam_color_detector.py`（衣物颜色） |
+
+**衣物颜色检测三种方法**：
+
+| 方法 | 原理 | 依赖 | 适用场景 |
+|------|------|------|---------|
+| `simple` | 肤色连通域分析：取画面下半部躯干区域，排除肤色后取最大连通域主色 | 仅 OpenCV | 无 MediaPipe 环境，基础可用 |
+| `pose` | MediaPipe PoseLandmarker：关节点定位肩膀→臀部躯干区域，排除肤色取主色 | `pose_landmarker.task` | 推荐，精度与稳定性平衡 |
+| `selfie` | MediaPipe SelfieSegmentation：像素级人物分割，取躯干下半部非肤色区域 | `selfie_segmenter.tflite` | 精度最高，多人场景选最大人物 |
+
+**测试命令**：
+```bash
+python vision/webcam_color_detector.py simple  # 简单方法
+python vision/webcam_color_detector.py pose    # Pose关节点（推荐）
+python vision/webcam_color_detector.py selfie   # 像素级分割
+```
+
+**MediaPipe 0.10+ API**：使用 Tasks API（`mp.tasks.python.vision`），非已废弃的 `mp.solutions.*`。
 
 ### 2.2 手势识别（MediaPipe）
 
@@ -942,11 +959,11 @@ Python 端入口：`test_integrated.py`（串联摄像头→手部→FSM→Bridg
 
 | 消息 | 内容 |
 |------|------|
-| `color_extraction_start` | 开始提取底色（大字提示"我来提取你的底色"） 🔸未实现 |
-| `object_detected` | 检测到物件区域 🔸未实现 |
-| `object_color_result` | 物件主色提取结果（color_type / 匹配失败） 🔸未实现 |
-| `clothing_color_result` | 衣物颜色提取结果 🔸未实现 |
-| `color_confirmed` | 颜色确认，开始晕染 🔸未实现 |
+| `color_extraction_start` | 开始提取底色（大字提示"我来提取你的底色"） ✅已实现 |
+| `object_detected` | 检测到物件区域 ✅已实现 |
+| `object_color_result` | 物件主色提取结果（color_type / 匹配失败） ✅已实现 |
+| `clothing_color_result` | 衣物颜色提取结果 ✅已实现 |
+| `color_confirmed` | 颜色确认，开始晕染 ✅已实现 |
 | `object_recognized` | 物象识别结果（单一最匹配物象名、置信度） |
 | `object_confirmed` | 用户握拳确认该物象 |
 | `character_candidates` | Top-3 人物推荐（名称、称号、分数、推荐理由） |
@@ -968,7 +985,7 @@ Python 端入口：`test_integrated.py`（串联摄像头→手部→FSM→Bridg
 
 | Bridge | 文件 | 职责 |
 |--------|------|------|
-| ColorDetectorBridge | 🔸未实现 | 颜色提取结果 → Unity 光圈绽放 |
+| ColorDetectorBridge | ✅已实现 | 颜色提取结果 → Unity 光圈绽放 |
 | SketchBridge | `unity_bridge/sketch_bridge.py` | CNN 分类 → Top-3 物象候选 |
 | CharacterBridge | `unity_bridge/character_bridge.py` | RAG 推荐 → Top-3 人物推荐 |
 
@@ -1002,9 +1019,9 @@ Python 端入口：`test_integrated.py`（串联摄像头→手部→FSM→Bridg
 
 | 模块 | 子模块 | 状态 |
 |------|--------|------|
-| **视觉输入** | 颜色提取（物件+衣物） | 🔸 未实现 |
+| **视觉输入** | 颜色提取（物件+衣物） | ✅ 已实现 |
 | | MediaPipe 手部追踪 | ✅ |
-| | 手势状态机（6 模式 FSM） | 🔸 新增COLOR_EXTRACTION，未实现 |
+| | 手势状态机（6 模式 FSM） | ✅ 新增COLOR_EXTRACTION，已实现 |
 | | QuickDraw CNN 草图识别 | ✅ val acc 83.8% |
 | | IP 摄像头连接 | ✅ |
 | **RAG 内容生成** | 知识库（208 实体 + 107 组合 + 100 模板） | ✅ |
@@ -1025,7 +1042,7 @@ Python 端入口：`test_integrated.py`（串联摄像头→手部→FSM→Bridg
 
 | 模块 | 总项 | ✅ | 🔸 | ⏸️ | 完成度 |
 |------|------|----|----|----|--------|
-| 视觉输入 | 5 | 3 | 2 | 0 | **60%** |
+| 视觉输入 | 5 | 5 | 0 | 0 | **100%** |
 | RAG 内容生成 | 6 | 6 | 0 | 0 | **100%** |
 | Unity 通信与渲染 | 5 | 4 | 0 | 1 | **80%** |
 | **总计** | **16** | **13** | **2** | **1** | **~81%** |
@@ -1039,7 +1056,7 @@ Python 端入口：`test_integrated.py`（串联摄像头→手部→FSM→Bridg
 |------|------|
 | 摄像头 → MediaPipe → FSM → SketchBridge → Unity 物象候选 | ✅ |
 | 摄像头 → MediaPipe → FSM → CharacterBridge → Unity 人物推荐 | ✅ |
-| 颜色提取（物件+衣物）→ Unity 光圈绽放 | 🔸 未实现 |
+| 颜色提取（物件+衣物）→ Unity 光圈绽放 | ✅ 已实现 |
 | RAG 检索 → LLM 叙事 → Wan 2.7 文生图/图生图 → 明信片合成 | ✅ |
 | 人物推荐 → 风格映射 → 颜色晕染底图 → 图生图融合 | ✅ |
 | 手部 21 关键点 → Unity 实时可视化 | ✅ |
@@ -1067,8 +1084,8 @@ Python 端入口：`test_integrated.py`（串联摄像头→手部→FSM→Bridg
 
 | 优先级 | 事项 | 说明 |
 |--------|------|------|
-| **P0** | 颜色提取实现 | 物件颜色提取 + 衣物颜色兜底（详见§2.1） |
-| **P0** | FSM COLOR_EXTRACTION 状态 | 新增第一幕专用状态机（详见§3.1.2） |
+| ~~P0~~ | 颜色提取实现 | ✅ 已实现（物件color_detector.py + 衣物webcam_color_detector.py） |
+| ~~P0~~ | FSM COLOR_EXTRACTION 状态 | ✅ 已实现（gesture_state_machine.py） |
 | P1 | 字体 zip 解压 | `assets/fonts/SourceHanSansSC.zip` → 优先思源字体 |
 | P2 | 多场景覆盖测试 | 不同颜色+物象+人物组合的生成效果 |
 | P2 | BM25 模糊检索 | 当前精确匹配，缺模糊检索能力 |
@@ -1078,8 +1095,8 @@ Python 端入口：`test_integrated.py`（串联摄像头→手部→FSM→Bridg
 
 ```
 vision/
-├── color_detector.py           # 颜色提取器（物件主色，🔸未实现）
-├── body_color_detector.py      # 衣物颜色提取（🔸未实现）
+├── color_detector.py           # 颜色提取器（物件主色，✅已实现）
+├── webcam_color_detector.py    # 衣物颜色提取器（电脑端摄像头，✅已实现，支持simple/pose/selfie三种方法）
 ├── hand_detector.py            # MediaPipe 手部检测
 ├── hand_tracker.py             # 手部追踪封装
 ├── gesture_state_machine.py    # 6 模式手势 FSM（🔸新增COLOR_EXTRACTION）

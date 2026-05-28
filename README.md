@@ -19,16 +19,16 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                           摄像头（IP Camera / USB）                       │
-│                         俯拍桌面：颜色牌 + 手部                           │
+│                         俯拍桌面：物件/衣物颜色 + 手部                    │
 └────────────────────────────────┬────────────────────────────────────────┘
                                  │
          ┌───────────────────────┼───────────────────────┐
          │                       │                       │
          ▼                       ▼                       ▼
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│  YOLOv8n + 双识别 │  │   MediaPipe     │  │   QuickDraw     │
-│  颜色牌检测      │  │   手部追踪      │  │   CNN 草图识别   │
-│  (颜色+纹路)    │  │   21关键点/30fps │  │   (82类/ONNX)  │
+│ HSV + MediaPipe │  │   MediaPipe     │  │   QuickDraw     │
+│  颜色检测       │  │   手部追踪      │  │   CNN 草图识别   │
+│  (物件/衣物)   │  │   21关键点/30fps │  │   (82类/ONNX)  │
 └────────┬────────┘  └────────┬────────┘  └────────┬────────┘
          │                     │                     │
          └─────────────────────┼─────────────────────┘
@@ -82,9 +82,6 @@ conda activate ohhh
 
 # 2. 安装依赖
 pip install -r requirements.txt
-
-# 3. 安装 PyTorch（用于 PiDiNet 边缘检测）
-pip install torch torchvision
 ```
 
 ### 运行测试
@@ -115,13 +112,12 @@ CAMERA_URL = "http://你的摄像头IP:8080/video"
 ```
 ohhh/
 ├── vision/                          # 视觉模块
-│   ├── color_detector.py           # 颜色提取（物件主色）🔸未实现
-│   ├── body_color_detector.py      # 衣物颜色提取 🔸未实现
+│   ├── color_detector.py           # 颜色提取（物件HSV主色）
+│   ├── webcam_color_detector.py    # 衣物颜色提取（MediaPipe三种方法）
 │   ├── hand_detector.py             # MediaPipe 手部检测
 │   ├── hand_tracker.py              # 手部追踪封装
 │   ├── gesture_state_machine.py     # 手势状态机（6模式）
 │   ├── sketch_recognizer.py        # QuickDraw 草图识别
-│   ├── edge_detection_ipcam.py     # PiDiNet 边缘检测
 │   ├── ipcamera.py                 # IP 摄像头连接
 │   └── quickdraw/                   # QuickDraw CNN 模型
 │
@@ -140,10 +136,6 @@ ohhh/
 │   ├── sender.py                    # 数据发送器
 │   ├── sketch_bridge.py            # 草图→物象桥接
 │   └── character_bridge.py          # 人物推荐桥接
-│
-├── yolo/                           # YOLO 训练（保留备用）
-│   ├── dataset.yaml                # 数据集配置
-│   └── train_yolo.py               # 训练脚本
 │
 ├── proposal/                        # 设计文档
 │   ├── interaction.md              # 交互设计详述
@@ -321,8 +313,8 @@ RAG 检索推荐 Top-3 历史人物。悬停预览简介，握拳确认选中。
 3. 六色匹配逻辑：岳麓绿 / 书院红 / 西迁黄 / 湘江蓝 / 校徽金 / 墨色
 
 **参考文件**：
-- `vision/color_detector.py`（物件颜色，🔸未实现）
-- `vision/body_color_detector.py`（衣物颜色，🔸未实现）
+- `vision/color_detector.py`（物件颜色）
+- `vision/webcam_color_detector.py`（衣物颜色，支持simple/pose/selfie三种方法）
 
 ---
 
@@ -377,7 +369,7 @@ RAG 检索推荐 Top-3 历史人物。悬停预览简介，握拳确认选中。
 [模块名] 具体做了什么
 
 例如：
-[vision] 添加 YOLO 识别模块
+[vision] 实现 HSV 物件颜色检测 + MediaPipe 衣物颜色检测
 [rag] 完成 BM25 检索基础实现
 ```
 
@@ -395,7 +387,7 @@ RAG 检索推荐 Top-3 历史人物。悬停预览简介，握拳确认选中。
 
 - **课程**：智能设计方法（Prompt Engineering / Role-Playing / Agent / Hallucination）
 - **数据集**：Google Quick, Draw!
-- **模型**：MediaPipe / YOLOv8 / PiDiNet / 阿里云百炼
+- **模型**：MediaPipe / QuickDraw CNN / 阿里云百炼
 
 ---
 

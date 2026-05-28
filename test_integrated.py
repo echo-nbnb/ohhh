@@ -77,11 +77,13 @@ class IntegratedServer:
     def __init__(self, camera_url: str = "", no_display: bool = False):
         self.camera_url = camera_url
         self.camera = None
+        self.webcam = None  # 电脑端摄像头（衣物颜色）
         self.hand_tracker = None
         self.fsm = None
         self.sketch_bridge = None
         self.character_bridge = None
-        self.color_card_detector = None  # YOLO 颜色牌检测（待训练后启用）
+        self.object_color_detector = None  # 物件颜色检测
+        self.webcam_color_detector = None  # 衣物颜色检测
 
         # Socket
         self.main_socket: Optional[socket.socket] = None     # :8888 → Unity
@@ -97,6 +99,7 @@ class IntegratedServer:
         self.frame_count = 0
         self.current_color = "岳麓绿"  # 默认第一幕颜色
         self.selected_objects: List[str] = []
+        self._current_frame: Optional[np.ndarray] = None  # 最新帧，用于回调中检测
 
         # 手部出现/消失检测（用于 Cover Flow）
         self._prev_hand_detected = False
@@ -187,6 +190,18 @@ class IntegratedServer:
         # 回调：模式切换 → 发送到 Unity
         self.fsm.on_mode_change = self._on_fsm_mode_change
 
+        # 回调：颜色提取开始
+        self.fsm.on_color_extraction_start = self._on_color_extraction_start
+
+        # 回调：物件颜色检测完成
+        self.fsm.on_object_color_detected = self._on_object_color_detected
+
+        # 回调：衣物兜底触发
+        self.fsm.on_clothing_fallback = self._on_clothing_fallback
+
+        # 回调：颜色确认
+        self.fsm.on_color_confirmed = self._on_color_confirmed
+
         # 回调：绘画完成 → 识别物象
         self.fsm.on_drawing_commit = self._on_drawing_commit
 
@@ -202,12 +217,34 @@ class IntegratedServer:
         # 回调：拒绝推荐 → 进入轮盘
         self.fsm.on_reject_recommendations = self._on_reject_recommendations
 
-        print("[OK] 手势状态机已就绪 (初始: GLOBAL)")
+        # 启动时自动进入颜色提取状态
+        self.fsm.trigger_color_extraction_start()
+
+        print("[OK] 手势状态机已就绪 (初始: COLOR_EXTRACTION)")
 
     # ── 桥接 ───────────────────────────────────────────────
 
     def _init_bridges(self):
         print("[4] 初始化桥接模块...")
+
+        # 物件颜色检测器
+        try:
+            from vision.color_detector import ObjectColorDetector
+            self.object_color_detector = ObjectColorDetector()
+            print("[OK] ObjectColorDetector 已就绪")
+        except Exception as e:
+            print(f"[!] ObjectColorDetector 初始化失败: {e}")
+
+        # 电脑端摄像头衣物颜色检测器
+        try:
+            from vision.webcam_color_detector import WebcamColorDetector
+            self.webcam_color_detector = WebcamColorDetector()
+            if self.webcam_color_detector.open():
+                print("[OK] WebcamColorDetector 已就绪")
+            else:
+                print("[!] WebcamColorDetector 摄像头打开失败")
+        except Exception as e:
+            print(f"[!] WebcamColorDetector 初始化失败: {e}")
 
         # 草图识别器
         try:
@@ -432,17 +469,90 @@ class IntegratedServer:
     def _on_reject_recommendations(self):
         print("  [FSM] 拒绝推荐 → 进入轮盘")
 
-        # 颜色牌检测器（YOLO mock 模式，待模型训练后切换真实检测）
+    # ── 颜色提取回调 ─────────────────────────────────────────
+
+    def _on_color_extraction_start(self):
+        """颜色提取开始：发送引导语到 Unity"""
+        print("  [FSM] 颜色提取开始")
+        self._send_main({
+            "type": "color_extraction_start",
+            "message": "我来提取你的底色",
+        })
+
+    def _on_object_color_detected(self):
+        """物件颜色检测：分析当前画面中的物件主色"""
+        print("  [FSM] 触发物件颜色检测")
+        if self.object_color_detector is None or self._current_frame is None:
+            # 检测器未就绪或无帧，触发衣物兜底
+            self.fsm.trigger_object_color_detected(False)
+            return
+
         try:
-            from vision.color_card_detector import create_color_card_detector
-            self.color_card_detector = create_color_card_detector(
-                model_path=None,  # TODO: 改为 "yolo/color_card.pt" 启用真实检测
-                frame_size=(640, 480),
-            )
-            print("[OK] ColorCardDetector 已就绪 (mock 模式)")
+            frame = self._current_frame
+            # 检测显著区域
+            region = self.object_color_detector.detect_dominant_region(frame)
+            if region is None:
+                print("  → 未检测到显著颜色区域，触发衣物兜底")
+                self.fsm.trigger_object_color_detected(False)
+                return
+
+            # 检测该区域颜色
+            result = self.object_color_detector.detect(frame, region)
+            if result is None:
+                print("  → 物件颜色未匹配六色，触发衣物兜底")
+                self.fsm.trigger_object_color_detected(False)
+                return
+
+            # 匹配成功
+            print(f"  → 物件颜色: {result.color_name} (置信度: {result.confidence:.2f})")
+            self.current_color = result.color_name
+            self.fsm.trigger_object_color_detected(True)
         except Exception as e:
-            print(f"[!] ColorCardDetector 初始化失败: {e}")
-            self.color_card_detector = None
+            print(f"  → 物件颜色检测异常: {e}，触发衣物兜底")
+            self.fsm.trigger_object_color_detected(False)
+
+    def _on_clothing_fallback(self):
+        """衣物兜底：使用电脑端摄像头检测衣物颜色"""
+        print("  [FSM] 触发衣物兜底（摄像头）")
+        if self.webcam_color_detector is None:
+            print("  → WebcamColorDetector 未就绪，使用默认墨色")
+            self.current_color = "墨色"
+            self.fsm.trigger_clothing_color_detected(False)
+            return
+
+        try:
+            # 从电脑端摄像头读取帧
+            webcam_frame = self.webcam_color_detector.read_frame()
+            if webcam_frame is None:
+                print("  → 摄像头读取失败，使用默认墨色")
+                self.current_color = "墨色"
+                self.fsm.trigger_clothing_color_detected(False)
+                return
+
+            # 检测衣物颜色
+            color_name, confidence = self.webcam_color_detector.detect(webcam_frame)
+            if color_name is None:
+                print("  → 衣物颜色未匹配六色，使用默认墨色")
+                self.current_color = "墨色"
+                self.fsm.trigger_clothing_color_detected(False)
+                return
+
+            print(f"  → 衣物颜色: {color_name} (置信度: {confidence:.2f})")
+            self.current_color = color_name
+            self.fsm.trigger_clothing_color_detected(True)
+        except Exception as e:
+            print(f"  → 衣物颜色检测异常: {e}，使用默认墨色")
+            self.current_color = "墨色"
+            self.fsm.trigger_clothing_color_detected(False)
+
+    def _on_color_confirmed(self):
+        """颜色确认：发送确认结果到 Unity"""
+        print(f"  [FSM] 颜色已确认: {self.current_color}")
+        self._send_main({
+            "type": "color_confirmed",
+            "color": self.current_color,
+            "message": f"我看到了……你的颜色是{self.current_color}。",
+        })
 
     def _run_camera_loop(self):
         from vision.hand_tracker import HAND_CONNECTIONS
@@ -461,14 +571,7 @@ class IntegratedServer:
 
             self.frame_count += 1
             h, w = frame.shape[:2]
-
-            # ── YOLO 颜色牌检测（每 5 帧运行一次，待模型训练后启用） ──
-            if self.color_card_detector and self.frame_count % 5 == 0:
-                cards = self.color_card_detector.detect(frame)
-                # TODO: 模型就绪后取消注释，将检测结果发送 Unity
-                # if cards and self.main_client:
-                #     msg = self.color_card_detector.to_unity_message(cards)
-                #     self._send_main(msg)
+            self._current_frame = frame  # 存储最新帧，供颜色检测回调使用
 
             # 手部检测
             results = self.hand_tracker._detect(frame, ts)
