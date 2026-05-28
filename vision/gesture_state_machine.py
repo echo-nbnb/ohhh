@@ -63,9 +63,10 @@ class DrawingSubState(Enum):
 
 
 class CandidateSubState(Enum):
-    BROWSING = "browsing"
-    CONFIRMED = "confirmed"
-    CANCELLED = "cancelled"
+    """第二幕物象确认状态（新流程：直接识别结果，等待确认/取消）"""
+    BROWSING = "browsing"    # 识别结果已发送到 Unity，等待用户确认（握拳）或取消（张手）
+    CONFIRMED = "confirmed"  # 用户握拳确认
+    CANCELLED = "cancelled"  # 用户张手取消
 
 
 class CharRecommendSubState(Enum):
@@ -109,6 +110,10 @@ class GestureStateMachine:
         # 绘画轨迹
         self.trajectory: List[Tuple[float, float, int]] = []  # [(x, y, ts_ms), ...]
 
+        # 当前识别的物象结果（第二幕新流程：直接识别最优结果）
+        self._recognized_object: Optional[Tuple[str, float, str]] = None
+        # (name, score, qd_category)
+
         # 手部状态
         self.palm_position: Tuple[float, float] = (0, 0)
         self.prev_palm_x: float = 0.0
@@ -128,7 +133,8 @@ class GestureStateMachine:
         self.on_drawing_start: Optional[Callable] = None
         self.on_drawing_commit: Optional[Callable[[List[Tuple[float, float, int]]], None]] = None
         self.on_drawing_cancel: Optional[Callable] = None
-        self.on_object_confirmed: Optional[Callable] = None
+        self.on_object_confirmed: Optional[Callable[[str, float, str], None]] = None
+        # (name, score, qd_category) - 第二幕新流程传递识别的物象
         self.on_character_confirmed: Optional[Callable] = None
         self.on_reject_recommendations: Optional[Callable] = None
         self.on_hand_moved: Optional[Callable[[float], None]] = None  # delta_x
@@ -262,16 +268,21 @@ class GestureStateMachine:
     def _process_candidate(self, gesture_changed: bool):
         if gesture_changed:
             if self.current_gesture == GestureType.FIST:
+                # 握拳确认：使用识别结果触发人物推荐
                 self.candidate_sub = CandidateSubState.CONFIRMED
                 self._transition_to(GestureMode.GLOBAL, "IDLE")
                 self.trajectory.clear()
-                if self.on_object_confirmed:
-                    self.on_object_confirmed()
+                if self.on_object_confirmed and self._recognized_object:
+                    name, score, qd_cat = self._recognized_object
+                    self.on_object_confirmed(name, score, qd_cat)
+                self._recognized_object = None
             elif self.current_gesture == GestureType.OPEN_HAND:
+                # 张手取消：回到绘画模式
                 self.candidate_sub = CandidateSubState.CANCELLED
                 self._transition_to(GestureMode.DRAWING, "TRACKING")
                 self.drawing_sub = DrawingSubState.TRACKING
                 self.trajectory.clear()
+                self._recognized_object = None
 
     def _process_char_recommend(self, gesture_changed: bool):
         if gesture_changed:

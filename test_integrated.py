@@ -99,11 +99,13 @@ class IntegratedServer:
         self.frame_count = 0
         self.current_color = "岳麓绿"  # 默认第一幕颜色
         self.selected_objects: List[str] = []
+        self.sketch_trajectories: Dict[str, List] = {}  # {物象名: [(x,y,ts_ms), ...]}
         self._current_frame: Optional[np.ndarray] = None  # 最新帧，用于回调中检测
 
         # 手部出现/消失检测（用于 Cover Flow）
         self._prev_hand_detected = False
         self._hand_appeared_sent = False  # 防止重复发送
+        self._pending_trajectory: List = []  # 临时存储待确认的轨迹
 
     # ── 启动 ───────────────────────────────────────────────
 
@@ -440,26 +442,49 @@ class IntegratedServer:
         self._send_gesture_state()
 
     def _on_drawing_commit(self, trajectory):
+        """第二幕新流程：直接识别最优结果，发送到 Unity"""
         print(f"  [FSM] 绘画提交! 轨迹点数={len(trajectory)}")
+        # 保存轨迹，等待确认后存入 sketch_trajectories
+        self._pending_trajectory = trajectory
         if self.sketch_bridge:
-            candidates = self.sketch_bridge.recognize(trajectory, self.current_color)
-            if candidates:
+            results = self.sketch_bridge.recognize(trajectory, self.current_color)
+            if results:
+                # 取最优结果
+                top = results[0]  # {'name': ..., 'score': ..., 'qd_category': ...}
+                name = top['name']
+                score = top['score']
+                qd_cat = top['qd_category']
+                self.fsm._recognized_object = (name, score, qd_cat)
                 self._send_main({
-                    "type": "object_candidates",
+                    "type": "object_recognized",
                     "color": self.current_color,
-                    "candidates": candidates,
+                    "object": {
+                        "name": name,
+                        "score": round(score, 4),
+                        "qd_category": qd_cat
+                    }
                 })
-                print(f"  → 已发送 {len(candidates)} 个物象候选到 Unity")
+                print(f"  → 已识别物象: {name} ({score:.2f}) → Unity")
             else:
+                self.fsm._recognized_object = None
+                self._pending_trajectory = []
                 print("  → 未识别到物象")
 
     def _on_drawing_cancel(self):
         print("  [FSM] 绘画取消")
+        self.fsm._recognized_object = None
+        self._pending_trajectory = []
         self._send_gesture_state()
 
-    def _on_object_confirmed(self):
-        print("  [FSM] 物象已确认 → 触发人物推荐")
-        if self.character_bridge and self.selected_objects:
+    def _on_object_confirmed(self, name: str, score: float, qd_cat: str):
+        """物象确认：触发人物推荐，保存轨迹"""
+        print(f"  [FSM] 物象已确认: {name} ({score:.2f}) → 触发人物推荐")
+        self.selected_objects.append(name)
+        # 保存轨迹（用于最终明信片 Layer 3）
+        if self._pending_trajectory:
+            self.sketch_trajectories[name] = self._pending_trajectory
+            self._pending_trajectory = []
+        if self.character_bridge:
             self.character_bridge.recommend(self.current_color, self.selected_objects)
 
     def _on_character_confirmed(self):

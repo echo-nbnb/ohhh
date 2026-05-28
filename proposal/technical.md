@@ -508,8 +508,8 @@ Python (:8888 主通道)                    Python (:8889 手部通道)
 
 | Bridge | 输入 | 输出 | 文件 |
 |--------|------|------|------|
-| ColorDetectorBridge | 物件/衣物颜色提取结果 | 颜色类型 → Unity 光圈绽放 | 🔸未实现 |
-| SketchBridge | CNN 分类结果 | Top-3 物象候选 → Unity | `unity_bridge/sketch_bridge.py` |
+| ColorDetectorBridge | 物件/衣物颜色提取结果 | 颜色类型 → Unity 光圈绽放 | ✅已实现 |
+| SketchBridge | CNN 分类结果 | 单一最优物象 → Unity（直接识别，无需候选选择） | `unity_bridge/sketch_bridge.py` |
 | CharacterBridge | RAG 推荐结果 | Top-3 人物推荐 → Unity | `unity_bridge/character_bridge.py` |
 
 ---
@@ -755,7 +755,7 @@ python vision/webcam_color_detector.py selfie   # 像素级分割
 |------|--------|---------|------|
 | **GLOBAL** | IDLE | — | 全局空闲，检测握拳晕染/张手停止 |
 | **DRAWING** | TRACKING → COMPLETED / CANCELLED | 食指伸出→握拳提交/张手取消 | 追踪指尖轨迹 → 送入草图识别 |
-| **CANDIDATE** | BROWSING → CONFIRMED / CANCELLED | 悬停+握拳确认/张手取消 | Top-3 物象选择 |
+| **CANDIDATE** | BROWSING → CONFIRMED / CANCELLED | 握拳确认/张手取消 | 直接识别结果确认（无需候选选择） |
 | **CHAR_RECOMMEND** | BROWSING → CONFIRMED / TO_WHEEL | 握拳确认/张手拒绝 | 人物推荐确认或进入轮盘 |
 | **CHAR_WHEEL** | SCROLLING → PREVIEWING → CONFIRMED / TO_RECOMMEND | 水平滑动+悬停+握拳 | 轮盘浏览选择人物 |
 
@@ -879,7 +879,7 @@ QuickDraw 类别 → 88 物象映射表
 
 ### 3.6 图生图管线
 
-颜色晕染底图由 Unity 前端渲染提供（用户选色后实时生成水墨渐变纹理），Python 端负责风格融合。
+颜色晕染底图由 Unity 前端渲染提供（用户选色后实时生成水墨渐变纹理），Python 端负责风格融合 + 分层合成。
 
 ```
 Unity 前端                        Python 后端                      阿里云 API
@@ -894,19 +894,37 @@ Unity 前端                        Python 后端                      阿里云
          │                              │
          │                         ← 融合图像
          │                              │
-         └──────────→ create_postcard() ←
+用户轨迹 ──→ 栅格化(3px笔画) ──────────┤
+         │                              │
+         └──────────→ create_layered_postcard() ←
                            │
-                     明信片合成 → Unity 展示
+                     分层明信片合成 → Unity 展示
 ```
+
+**分层明信片结构**（`create_layered_postcard`）：
+
+| Layer | 内容 | 实现 |
+|-------|------|------|
+| 0 | 纸质纹理底 | `_get_paper_texture()` — 按人物时代生成宣纸/牛皮纸/仿旧纸 |
+| 1 | 颜色晕染层 | 30%透明度叠加 Base64 颜色晕染图 |
+| 2 | AI生成主画面 | Wan 2.7 图生图输出居中放置 |
+| 3 | 用户原始线稿 | `_rasterize_trajectory()` — 3px笔画，15%透明度叠加 ⭐ |
+| 5 | 人物光柱/剪影 | 预留（第三幕召唤效果） |
+| 6 | 个性化文字 | `_draw_vertical_calligraphy()` — 叙事摘要竖排嵌入空白区 |
+| 7 | 时间戳+编号+印章 | 右下角印章 + 日期编号 |
+| 8 | 装饰边框 | `_draw_period_border()` — 按人物时代风格（水墨/印章/木刻等） |
+
+> 用户线稿叠加：用户亲手画的歪歪扭扭的笔触原汁原味保留，不被AI重新"画"一遍。
 
 | 步骤 | 输入 | 模型/方式 | 输出 |
 |------|------|-----------|------|
 | 颜色晕染 | 颜色名 + hex | Unity 前端实时渲染 | 水墨渐变纹理 (Base64) |
 | 风格 prompt | 人物名 → 分组 → 风格 | `get_character_style()` | 英文视觉风格 prompt |
 | 图生图融合 | 底图 + 风格 prompt | `wan2.7-image-pro`（异步） | 融合图像 URL + 本地下载 |
-| 明信片合成 | 融合图像 + 叙事文本 | PIL 动态布局 | 完整叙事卡 |
+| 明信片合成 | 融合图像 + 叙事文本 + 用户轨迹 | PIL 分层合成 | 完整分层叙事卡 |
 
 > 文件：`rag/generator.py` → `generate_image_with_base()`, `build_character_style_prompt()`
+> 文件：`rag/postcard.py` → `create_layered_postcard()`（新）
 
 ### 3.7 生成质量改进路线图
 
@@ -986,7 +1004,7 @@ Python 端入口：`test_integrated.py`（串联摄像头→手部→FSM→Bridg
 | Bridge | 文件 | 职责 |
 |--------|------|------|
 | ColorDetectorBridge | ✅已实现 | 颜色提取结果 → Unity 光圈绽放 |
-| SketchBridge | `unity_bridge/sketch_bridge.py` | CNN 分类 → Top-3 物象候选 |
+| SketchBridge | `unity_bridge/sketch_bridge.py` | CNN 分类 → 单一最优物象（直接识别） |
 | CharacterBridge | `unity_bridge/character_bridge.py` | RAG 推荐 → Top-3 人物推荐 |
 
 ### 4.4 Unity 端组件

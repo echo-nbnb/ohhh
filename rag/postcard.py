@@ -6,6 +6,7 @@
 import os
 import json
 import base64
+import numpy as np
 from io import BytesIO
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -176,6 +177,382 @@ class PostcardGenerator:
             lines = self._wrap_para(draw, para, font, max_width)
             total += len(lines) * self.LINE_HEIGHT + self.PARA_SPACING
         return total
+
+    # ── 分层合成新增方法 ─────────────────────────────────────
+
+    def _rasterize_trajectory(self, trajectory: List[Tuple[float, float, float]],
+                               target_size: Tuple[int, int]) -> Image.Image:
+        """
+        将用户轨迹转换为带笔画宽度的线稿图像
+
+        Args:
+            trajectory: [(x, y, ts_ms), ...] 归一化坐标 (0-1)
+            target_size: 目标尺寸 (width, height)
+
+        Returns:
+            RGBA PIL Image，黑线白底
+        """
+        w, h = target_size
+        # 创建 RGBA 画布（透明底）
+        canvas = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(canvas)
+
+        if len(trajectory) < 2:
+            return canvas
+
+        # 转换坐标并绘制线段
+        stroke_width = 3
+        prev_x, prev_y = None, None
+
+        for x_norm, y_norm, _ in trajectory:
+            x = int(x_norm * w)
+            y = int(y_norm * h)
+            if prev_x is not None:
+                # 抗锯齿线段
+                draw.line([(prev_x, prev_y), (x, y)],
+                         fill=(0, 0, 0, 255), width=stroke_width)
+            prev_x, prev_y = x, y
+
+        return canvas
+
+    def _find_empty_region(self, img: Image.Image,
+                           text_size: Tuple[int, int],
+                           margin: int = 40) -> Tuple[int, int]:
+        """
+        寻找图像中颜色最均匀（最空）的区域放置文字
+
+        Args:
+            img: PIL Image
+            text_size: 文字区域尺寸 (width, height)
+            margin: 边距
+
+        Returns:
+            (x, y) 左上角坐标
+        """
+        w, h = img.size
+        tw, th = text_size
+
+        # 缩小图像加速计算
+        scale = 8
+        small_w, small_h = w // scale, h // scale
+        small_img = img.resize((small_w, small_h), Image.LANCZOS)
+        small_gray = small_img.convert('L')
+
+        tw_s, th_s = tw // scale, th // scale
+
+        # 九宫格检测：计算每个格子的方差
+        grid_scores = []
+        grid_positions = []
+
+        for gy in range(3):
+            for gx in range(3):
+                x_start = gx * small_w // 3 + margin // scale
+                y_start = gy * small_h // 3 + margin // scale
+                x_end = (gx + 1) * small_w // 3 - margin // scale - tw_s
+                y_end = (gy + 1) * small_h // 3 - margin // scale - th_s
+
+                if x_end <= x_start or y_end <= y_start:
+                    continue
+
+                # 计算这个格子的颜色方差
+                region = small_gray.crop((x_start, y_start, x_end, y_end))
+                var = region.var()
+
+                grid_scores.append(var)
+                grid_positions.append((gx, gy, x_start * scale, y_start * scale))
+
+        # 选择方差最小（最空）的格子
+        best_idx = grid_scores.index(min(grid_scores)) if grid_scores else 0
+        _, _, best_x, best_y = grid_positions[best_idx] if grid_positions else (0, 0, margin, margin)
+
+        # 如果最空区域方差仍然太高，放右下角
+        if grid_scores and max(grid_scores) > 1000:
+            best_x = w - tw - margin
+            best_y = h - th - margin
+
+        return (max(margin, min(best_x, w - tw - margin)),
+                max(margin, min(best_y, h - th - margin)))
+
+    def _get_paper_texture(self, style: str) -> Image.Image:
+        """
+        获取时代风格的纸张纹理
+
+        Args:
+            style: 风格类型
+                - "classical": 宣纸纹理（理学脉络）
+                - "modern": 米白纸张（现代学人）
+                - "kraft": 牛皮纸（校园角色）
+                - "vintage": 仿古纸（近代）
+
+        Returns:
+            PIL Image
+        """
+        w, h = self.config.width, self.config.height
+        colors = {
+            "classical": (245, 240, 230),   # 宣纸色
+            "modern": (250, 248, 245),     # 米白
+            "kraft": (210, 180, 140),      # 牛皮纸
+            "vintage": (235, 225, 210),   # 仿旧纸
+        }
+        bg_color = colors.get(style, colors["classical"])
+        paper = Image.new('RGB', (w, h), bg_color)
+
+        # 添加噪声纹理模拟纸张质感
+        np.random.seed(42)
+        noise = np.random.randint(-5, 5, (h, w, 3), dtype=np.int16)
+        paper_arr = np.array(paper, dtype=np.int16)
+        paper_arr = np.clip(paper_arr + noise, 0, 255).astype(np.uint8)
+        return Image.fromarray(paper_arr)
+
+    def _draw_period_border(self, canvas: Image.Image, style: str):
+        """
+        绘制时代风格边框
+
+        Args:
+            canvas: 画布
+            style: 风格类型
+                - "classical": 水墨边栏 + 简约竖线
+                - "military": 印章感 + 朱红边线
+                - "revolution": 木刻感 + 粗黑边框
+                - "modern": 素描纸 + 铅笔线条
+                - "campus": 牛皮纸 + 手账风
+                - "abstract": 水墨飞白
+        """
+        draw = ImageDraw.Draw(canvas)
+        w, h = canvas.size
+        margin = 30
+
+        if style == "classical":
+            # 水墨边栏：深色边框 + 简约竖线
+            draw.rectangle([(margin, margin), (w - margin, h - margin)],
+                          outline=(60, 50, 40), width=3)
+            # 顶部和底部装饰线
+            draw.line([(margin + 20, margin + 15), (w - margin - 20, margin + 15)],
+                     fill=(60, 50, 40), width=1)
+            draw.line([(margin + 20, h - margin - 15), (w - margin - 20, h - margin - 15)],
+                     fill=(60, 50, 40), width=1)
+
+        elif style == "military":
+            # 印章感：朱红双边线
+            draw.rectangle([(margin, margin), (w - margin, h - margin)],
+                          outline=(180, 50, 50), width=2)
+            draw.rectangle([(margin + 8, margin + 8), (w - margin - 8, h - margin - 8)],
+                          outline=(150, 40, 40), width=1)
+            # 角落印章符号
+            for cx, cy in [(margin + 20, margin + 20), (w - margin - 20, h - margin - 20)]:
+                draw.ellipse([(cx - 8, cy - 8), (cx + 8, cy + 8)],
+                           outline=(180, 50, 50), width=2)
+
+        elif style == "revolution":
+            # 木刻感：粗黑边框
+            draw.rectangle([(margin, margin), (w - margin, h - margin)],
+                          outline=(30, 20, 20), width=5)
+            draw.rectangle([(margin + 10, margin + 10), (w - margin - 10, h - margin - 10)],
+                          outline=(30, 20, 20), width=1)
+
+        elif style == "modern":
+            # 素描纸：浅灰边框
+            draw.rectangle([(margin, margin), (w - margin, h - margin)],
+                          outline=(180, 175, 165), width=2)
+
+        elif style == "campus":
+            # 手账风：浅色边框
+            draw.rectangle([(margin, margin), (w - margin, h - margin)],
+                          outline=(160, 140, 110), width=2)
+            # 点状装饰
+            for i in range(margin + 15, w - margin - 15, 20):
+                draw.ellipse([(i - 2, margin + 12), (i + 2, margin + 16)],
+                           fill=(160, 140, 110))
+
+        else:  # abstract
+            # 水墨飞白：渐隐边框
+            draw.rectangle([(margin, margin), (w - margin, h - margin)],
+                          outline=(80, 70, 60), width=2)
+
+    def _draw_vertical_calligraphy(self, canvas: Image.Image, text: str,
+                                    position: Tuple[int, int],
+                                    font_size: int = 28,
+                                    color: Tuple[int, int, int] = (60, 50, 40)):
+        """
+        绘制竖排书法文字（落款用）
+
+        Args:
+            canvas: 画布
+            text: 文字内容
+            position: (x, y) 左上角
+            font_size: 字体大小
+            color: 文字颜色
+        """
+        draw = ImageDraw.Draw(canvas)
+        font = self.font_manager._load_font("simhei.ttf", font_size)
+
+        x, y = position
+        char_height = font_size + 8
+
+        for char in text:
+            draw.text((x, y), char, font=font, fill=color)
+            y += char_height
+
+    def create_layered_postcard(self,
+                                 narrative_result: Dict,
+                                 wan_image: Image.Image = None,
+                                 color_wash_base64: str = None,
+                                 sketch_trajectories: Dict[str, List] = None,
+                                 character_group: str = "classical",
+                                 signature_text: str = None,
+                                 unique_id: str = None) -> Optional[Image.Image]:
+        """
+        生成分层明信片
+
+        Layer 0: 纸质纹理底（宣纸/牛皮纸/水墨纸，由人物时代决定）
+        Layer 1: 颜色晕染层（来自第一幕，半透明）
+        Layer 2: AI生成主画面（Wan输出）
+        Layer 3: 用户原始线稿（低透明度叠加，15%）
+        Layer 4: (跳过，不使用)
+        Layer 5: 人物光柱/剪影（预留）
+        Layer 6: 个性化文字（叙事文本节选）
+        Layer 7: 时间戳 + 唯一编号 + 落款印章
+        Layer 8: 装饰边框（按人物时代风格）
+
+        Args:
+            narrative_result: 叙事内容 {"title": ..., "paragraphs": ..., "summary": ...}
+            wan_image: Wan生成的AI主画面
+            color_wash_base64: 颜色晕染底图（base64）
+            sketch_trajectories: {物象名: [(x,y,ts_ms), ...]} 用户绘画轨迹
+            character_group: 人物分组，影响纸张/边框/风格
+            signature_text: 落款文字（默认"湖南大学·寻麓千年色"）
+            unique_id: 唯一编号
+
+        Returns:
+            PIL Image
+        """
+        if not PIL_AVAILABLE:
+            return None
+
+        w, h = self.config.width, self.config.height
+        paper_styles = {
+            "classical": "classical",     # 理学脉络
+            "military": "vintage",         # 湘军将帅
+            "revolution": "vintage",       # 维新革命
+            "modern": "modern",           # 现代学人
+            "campus": "kraft",            # 校园角色
+            "abstract": "classical",       # 抽象意象
+        }
+        border_styles = {
+            "classical": "classical",
+            "military": "military",
+            "revolution": "revolution",
+            "modern": "modern",
+            "campus": "campus",
+            "abstract": "abstract",
+        }
+
+        paper_style = paper_styles.get(character_group, "classical")
+        border_style = border_styles.get(character_group, "classical")
+
+        # Layer 0: 纸质纹理
+        canvas = self._get_paper_texture(paper_style)
+
+        # Layer 1: 颜色晕染（半透明叠加在纸张上）
+        if color_wash_base64:
+            color_wash = self._load_base64_image(color_wash_base64)
+            if color_wash:
+                # 缩放到画布尺寸，半透明叠加
+                color_wash = color_wash.resize((w, h), Image.LANCZOS)
+                # 创建半透明版本
+                color_arr = np.array(color_wash)
+                alpha_wash = Image.fromarray(color_arr).convert('RGBA')
+                # 降低透明度 30%
+                rgba = np.array(alpha_wash)
+                rgba[:, :, 3] = (rgba[:, :, 3] * 0.3).astype(np.uint8)
+                alpha_wash = Image.fromarray(rgba)
+                canvas_rgba = canvas.convert('RGBA')
+                canvas_rgba = Image.alpha_composite(canvas_rgba, alpha_wash)
+                canvas = canvas_rgba.convert('RGB')
+
+        # Layer 2: AI主画面（缩放居中）
+        painting_area_top = int(h * 0.15)
+        painting_area_bottom = int(h * 0.65)
+        painting_area_h = painting_area_bottom - painting_area_top
+
+        if wan_image:
+            aspect = wan_image.width / wan_image.height
+            target_w = int(painting_area_h * aspect)
+            target_w = min(target_w, w - 60)
+            target_h = int(target_w / aspect)
+            wan_resized = wan_image.resize((target_w, target_h), Image.LANCZOS)
+            x_offset = (w - target_w) // 2
+            canvas.paste(wan_resized, (x_offset, painting_area_top))
+
+        # Layer 3: 用户线稿叠加（15%透明度）
+        if sketch_trajectories:
+            for obj_name, trajectory in sketch_trajectories.items():
+                if len(trajectory) < 5:
+                    continue
+                # 转换轨迹坐标到画布尺寸
+                sketch_img = self._rasterize_trajectory(trajectory, (w, painting_area_h))
+
+                # 调整位置：在画面下半部居中
+                sketch_x = (w - sketch_img.width) // 2
+                sketch_y = painting_area_top + int(painting_area_h * 0.3)
+
+                # 15%透明度叠加
+                sketch_rgba = np.array(sketch_img)
+                sketch_rgba[:, :, 3] = (sketch_rgba[:, :, 3] * 0.15).astype(np.uint8)
+                sketch_alpha = Image.fromarray(sketch_rgba).convert('RGBA')
+
+                canvas_rgba = canvas.convert('RGBA')
+                canvas_rgba.paste(sketch_alpha, (sketch_x, sketch_y), sketch_alpha)
+                canvas = canvas_rgba.convert('RGB')
+
+        # Layer 6: 个性化文字（找空白区域嵌入竖排落款）
+        draw = ImageDraw.Draw(canvas)
+        # 取叙事摘要作为落款文字（取第一段或摘要）
+        calligraphic_text = narrative_result.get("summary", "")
+        if not calligraphic_text and narrative_result.get("paragraphs"):
+            calligraphic_text = narrative_result["paragraphs"][0][:20]
+
+        if calligraphic_text:
+            # 估算文字尺寸（竖排）
+            test_img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+            self._draw_vertical_calligraphy(test_img, calligraphic_text[:10],
+                                           (w // 2, h // 2), 32)
+            # 找一个合适的位置
+            text_w, text_h = 60, len(calligraphic_text[:10]) * 40
+            text_x, text_y = self._find_empty_region(canvas, (text_w, text_h))
+            # 实际绘制（深灰色墨色）
+            self._draw_vertical_calligraphy(canvas, calligraphic_text[:15],
+                                           (w - 120, h - 300), 28,
+                                           (60, 50, 40))
+
+        # Layer 7: 时间戳 + 编号 + 印章
+        date_str = datetime.now().strftime("%Y.%m.%d")
+        id_str = unique_id or f"ML{int(datetime.now().timestamp())}"
+
+        font_small = self.font_manager._load_font("simhei.ttf", 20)
+        draw.text((40, h - 60), f"湖南大学·寻麓千年色", font=font_small,
+                 fill=(120, 100, 80))
+        draw.text((40, h - 35), f"{date_str}  #{id_str}", font=font_small,
+                 fill=(120, 100, 80))
+
+        # 印章
+        seal_text = "湖大"
+        font_seal = self.font_manager._load_font("simhei.ttf", 22)
+        seal_size = 65
+        seal_x, seal_y = w - 100, h - 90
+        draw.rectangle([(seal_x, seal_y), (seal_x + seal_size, seal_y + seal_size)],
+                      outline=self.config.seal_color, width=2)
+        bbox = draw.textbbox((0, 0), seal_text, font=font_seal)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        draw.text((seal_x + (seal_size - text_w) // 2,
+                   seal_y + (seal_size - text_h) // 2),
+                  seal_text, font=font_seal, fill=self.config.seal_color)
+
+        # Layer 8: 时代风格边框
+        self._draw_period_border(canvas, border_style)
+
+        return canvas
 
     def _create_canvas(self, height: int = None) -> Image.Image:
         """创建画布（宣纸底），高度可选动态"""

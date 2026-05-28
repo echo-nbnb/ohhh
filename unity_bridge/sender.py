@@ -140,7 +140,31 @@ class UnitySender:
             self._hand_socket = None
             return False
 
-    # ── Act 2: 物象候选 ───────────────────────────────────
+    # ── Act 2: 物象识别结果 ─────────────────────────────────
+
+    def send_object_recognized(self, color: str,
+                               name: str, score: float,
+                               qd_category: str = "") -> bool:
+        """
+        发送单一物象识别结果（第二幕新流程：直接识别最优结果）
+
+        Args:
+            color: 第一幕颜色名，如 "岳麓绿"
+            name: 物象名称
+            score: 置信度
+            qd_category: QuickDraw 类别
+        """
+        return self.send({
+            "type": "object_recognized",
+            "color": color,
+            "object": {
+                "name": name,
+                "score": round(score, 4),
+                "qd_category": qd_category
+            }
+        })
+
+    # ── Act 2: 物象候选（旧流程，保留备用）───
 
     def send_object_candidates(self, color: str,
                                candidates: List[Tuple[str, float, str]]) -> bool:
