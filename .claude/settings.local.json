@@ -15,7 +15,29 @@
       "Bash(\"D:\\\\softwares\\\\anaconda\\\\envs\\\\ohhh\\\\python.exe\" -m pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cu121 --force-reinstall)",
       "Bash(D:\\\\softwares\\\\anaconda\\\\envs\\\\ohhh\\\\python.exe:*)",
       "Bash(\"D:\\\\softwares\\\\anaconda\\\\envs\\\\ohhh\\\\python.exe\" -m pip install --upgrade ultralytics --no-cache-dir)",
-      "Bash(\"D:\\\\softwares\\\\anaconda\\\\envs\\\\ohhh\\\\python.exe\" \"D:\\\\projects\\\\ohhh\\\\yolo\\\\train_yolo_manual.py\")"
+      "Bash(\"D:\\\\softwares\\\\anaconda\\\\envs\\\\ohhh\\\\python.exe\" \"D:\\\\projects\\\\ohhh\\\\yolo\\\\train_yolo_manual.py\")",
+      "Bash(git push *)",
+      "Bash(git status *)",
+      "Read(//tmp/source-han-serif/**)",
+      "Read(//tmp/**)",
+      "Bash(gh release *)",
+      "Bash(python3 -c ' *)",
+      "Bash(rm -f *.zip)",
+      "Bash(mkdir -p SC TC HK JP KR)",
+      "Bash(python3 *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git rm *)",
+      "Bash(grep -E '\\(__pycache__|\\\\.pyc$\\)')",
+      "Bash(git checkout *)",
+      "Bash(git commit *)",
+      "Bash(rm -f D:/projects/ohhh/temp_*.png)",
+      "Read(//c/Users/lenovo/Desktop/**)",
+      "Bash(pdftotext -layout \"C:\\\\Users\\\\lenovo\\\\Desktop\\\\智能设计方法3-智能生成.pdf\" -)",
+      "Bash(git stash *)",
+      "Bash(git merge *)",
+      "Bash(gh repo *)",
+      "Bash(git pull *)"
     ]
   }
 }
