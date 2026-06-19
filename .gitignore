@@ -9,3 +9,4 @@ vision/pidinet/*.pth
 yolo/runs/*/*/epoch_*.pt
 # temp downloads
 temp_*
+rag/oss_config.py

@@ -16,6 +16,7 @@
 无摄像头时自动使用假数据演示手势状态机流程。
 """
 
+import os
 import cv2
 import json
 import socket
@@ -23,6 +24,7 @@ import sys
 import time
 import threading
 import logging
+from datetime import datetime
 from typing import Optional, Dict, List
 
 sys.path.insert(0, ".")
@@ -74,7 +76,7 @@ def make_open_hand_landmarks():
 class IntegratedServer:
     """集成测试服务器：双端口 + 手势状态机 + 桥接"""
 
-    def __init__(self, camera_url: str = "", no_display: bool = False):
+    def __init__(self, camera_url: str = "", no_display: bool = False, no_camera: bool = False):
         self.camera_url = camera_url
         self.camera = None
         self.webcam = None  # 电脑端摄像头（衣物颜色）
@@ -96,6 +98,7 @@ class IntegratedServer:
         self.is_running = False
         self.use_fake_camera = False
         self.no_display = no_display
+        self.no_camera = no_camera
         self.frame_count = 0
         self.current_color = "岳麓绿"  # 默认第一幕颜色
         self.selected_objects: List[str] = []
@@ -115,7 +118,10 @@ class IntegratedServer:
         print("=" * 60)
 
         # 1. 摄像头
-        if not self._init_camera():
+        if self.no_camera:
+            print("[!] --no-camera: 跳过摄像头，仅 TCP 手势模拟")
+            self.use_fake_camera = True
+        elif not self._init_camera():
             print("\n[!] 摄像头不可用，使用模拟手势数据进行演示")
             print("    手势流程: 食指伸出→绘画→握拳确认→物象候选→人物推荐")
             self.use_fake_camera = True
@@ -127,12 +133,12 @@ class IntegratedServer:
         # 3. 手势状态机
         self._init_gesture_fsm()
 
-        # 4. 桥接
-        self._init_bridges()
-
-        # 5. 启动 TCP 服务器
+        # 4. 启动 TCP 服务器（先启动，确保不被桥接卡住）
         self.is_running = True
         self._start_servers()
+
+        # 5. 桥接
+        self._init_bridges()
 
         # 6. 主循环
         print("\n[运行] 等待 Unity 连接...")
@@ -186,7 +192,7 @@ class IntegratedServer:
 
     def _init_gesture_fsm(self):
         print("[3] 初始化手势状态机...")
-        from vision.gesture_state_machine import create_gesture_state_machine
+        from vision.gesture_state_machine import create_gesture_state_machine, GestureMode
         self.fsm = create_gesture_state_machine()
 
         # 回调：模式切换 → 发送到 Unity
@@ -237,16 +243,28 @@ class IntegratedServer:
         except Exception as e:
             print(f"[!] ObjectColorDetector 初始化失败: {e}")
 
-        # 电脑端摄像头衣物颜色检测器
+        # 电脑端摄像头衣物颜色检测器（超时保护，防止卡住 TCP 启动）
         try:
             from vision.webcam_color_detector import WebcamColorDetector
             self.webcam_color_detector = WebcamColorDetector()
-            if self.webcam_color_detector.open():
+            # 在子线程中打开摄像头，最多等 3 秒
+            result = {"ok": False}
+            def _open_webcam():
+                try:
+                    result["ok"] = self.webcam_color_detector.open()
+                except Exception:
+                    pass
+            t = threading.Thread(target=_open_webcam, daemon=True)
+            t.start()
+            t.join(timeout=3.0)
+            if result["ok"]:
                 print("[OK] WebcamColorDetector 已就绪")
             else:
-                print("[!] WebcamColorDetector 摄像头打开失败")
+                print("[!] WebcamColorDetector 不可用（衣物兜底将跳过）")
+                self.webcam_color_detector = None
         except Exception as e:
             print(f"[!] WebcamColorDetector 初始化失败: {e}")
+            self.webcam_color_detector = None
 
         # 草图识别器
         try:
@@ -355,7 +373,15 @@ class IntegratedServer:
             msg_type = data.get("type", data.get("event", ""))
             print(f"[Unity→] {msg_type}: {json.dumps(data, ensure_ascii=False)[:120]}")
 
-            if msg_type == "object_selected":
+            if msg_type == "gesture_simulate":
+                # TCP 手势模拟（测试用）
+                gesture = data.get("gesture", "")
+                lm = self._make_fake_landmarks(gesture)
+                if lm and self.fsm:
+                    self.fsm.process(lm, int(time.time() * 1000))
+                return
+
+            elif msg_type == "object_selected":
                 obj_name = data.get("name", "")
                 print(f"  → 物象选中: {obj_name}")
                 self.selected_objects.append(obj_name)
@@ -437,8 +463,36 @@ class IntegratedServer:
 
     # ── FSM 回调 ───────────────────────────────────────────
 
+    def _make_fake_landmarks(self, gesture: str):
+        """TCP 手势模拟 → Fake Landmarks"""
+        from test_integrated import FakeLandmark  # reuse demo helpers
+        class FL:
+            def __init__(self, x, y, z=0): self.x = x; self.y = y; self.z = z
+        if gesture == "fist":
+            lm = [FL(0.5, 0.5)] * 21
+            for ti, mi in [(4,3),(8,6),(12,10),(16,14),(20,18)]:
+                lm[ti] = FL(0.5, 0.85); lm[mi] = FL(0.5, 0.45)
+            return lm
+        elif gesture == "open_hand":
+            lm = [FL(0.5, 0.5)] * 21
+            for ti, mi in [(4,3),(8,6),(12,10),(16,14),(20,18)]:
+                lm[ti] = FL(0.5, 0.15); lm[mi] = FL(0.5, 0.45)
+            return lm
+        elif gesture == "index_pointing":
+            lm = [FL(0.5, 0.5)] * 21
+            for ti, mi in [(4,3),(8,6),(12,10),(16,14),(20,18)]:
+                lm[ti] = FL(0.5, 0.85); lm[mi] = FL(0.5, 0.45)
+            lm[8] = FL(0.5, 0.1); lm[6] = FL(0.5, 0.4)
+            return lm
+        return None
+
     def _on_fsm_mode_change(self, mode: str, sub_state: str, gesture: str):
         print(f"  [FSM] mode={mode} sub={sub_state} gesture={gesture}")
+        if mode == "DRAWING" and sub_state == "TRACKING":
+            self._send_main({
+                "type": "drawing_start",
+                "message": "伸出食指，开始作画。"
+            })
         self._send_gesture_state()
 
     def _on_drawing_commit(self, trajectory):
@@ -474,110 +528,273 @@ class IntegratedServer:
         print("  [FSM] 绘画取消")
         self.fsm._recognized_object = None
         self._pending_trajectory = []
+        self._send_main({
+            "type": "drawing_cancelled",
+            "message": "没关系。有些图像，需要再画一次才会清晰。"
+        })
         self._send_gesture_state()
 
     def _on_object_confirmed(self, name: str, score: float, qd_cat: str):
-        """物象确认：触发人物推荐，保存轨迹"""
+        """物象确认 → 自动人物推荐 + 演绎 + 生成"""
         print(f"  [FSM] 物象已确认: {name} ({score:.2f}) → 触发人物推荐")
         self.selected_objects.append(name)
-        # 保存轨迹（用于最终明信片 Layer 3）
+        # 保存轨迹
         if self._pending_trajectory:
             self.sketch_trajectories[name] = self._pending_trajectory
             self._pending_trajectory = []
+
+        # 1. 物象确认消息
+        objs = list(self.selected_objects)
+        self._send_main({
+            "type": "object_confirmed",
+            "object": name,
+            "objects_so_far": objs,
+            "message": f"一个意象已经落下。" if len(objs) == 1
+                       else f"又一个意象落下。{'、'.join(objs)}，它们在一起了。",
+            "can_continue": True
+        })
+
+        # 2. 人物推荐 + 自动演绎 + 生成
         if self.character_bridge:
-            self.character_bridge.recommend(self.current_color, self.selected_objects)
+            candidates = self.character_bridge.recommend(self.current_color, self.selected_objects)
+            if candidates:
+                top = candidates[0]
+                # 搜索解释
+                self._send_main({
+                    "type": "character_search_start",
+                    "message": f"你的{self.current_color}指向{'、'.join(objs)}。"
+                               f"一位与「{top.get('reason','')}」有关的人，正向你走来。",
+                    "context": {"color": self.current_color, "objects": objs}
+                })
+                time.sleep(0.1)
+                self._send_main({
+                    "type": "character_found",
+                    "message": "找到了。",
+                    "character_name_hidden": True
+                })
+                # 第一人称演绎
+                time.sleep(0.1)
+                self._send_main({
+                    "type": "character_performance",
+                    "character": "????",
+                    "paragraphs": [
+                        f"你选择了{self.current_color}。",
+                        f"你画下了{'、'.join(objs)}。",
+                        "后来者，千年文脉在此刻与你相遇。"
+                    ]
+                })
+                # 揭示人物
+                time.sleep(0.1)
+                self._send_main({
+                    "type": "character_revealed",
+                    "name": top.get("name", ""),
+                    "title": top.get("title", ""),
+                    "message": f"刚才与你说话的，是{top.get('name','')}。"
+                })
+                # 自动生成
+                time.sleep(0.1)
+                gen_result = {
+                    "type": "generation_result",
+                    "title": "你寻到的千年色",
+                    "paragraphs": [
+                        f"{self.current_color}已经展开。",
+                        f"{'、'.join(objs)}也已经落下。",
+                        f"{top.get('name','')}的声音回荡在千年书院中。",
+                        "这就是你寻到的千年色。"
+                    ],
+                    "context": {
+                        "color": self.current_color,
+                        "objects": objs,
+                        "character": top.get("name", "")
+                    }
+                }
+                self._send_main(gen_result)
+
+                # 明信片上传 OSS + 二维码
+                try:
+                    from rag.uploader import PostcardUploader
+                    from PIL import Image, ImageDraw, ImageFont
+                    # 生成简单的明信片
+                    card = Image.new("RGB", (1080, 1440), (245, 240, 230))
+                    draw = ImageDraw.Draw(card)
+                    # 尝试加载中文字体
+                    font = None
+                    for fp in [r"C:\Windows\Fonts\simhei.ttf",
+                               r"C:\Windows\Fonts\msyh.ttc",
+                               "C:\\Windows\\Fonts\\simsun.ttc"]:
+                        if os.path.exists(fp):
+                            try:
+                                font = ImageFont.truetype(fp, 48)
+                                break
+                            except: pass
+                    if font is None:
+                        font = ImageFont.load_default()
+
+                    y = 200
+                    draw.text((100, 80), "寻麓千年色", font=font, fill=(50, 40, 30))
+                    for para in gen_result["paragraphs"]:
+                        draw.text((100, y), para, font=font, fill=(60, 50, 40))
+                        y += 80
+                    draw.text((100, y + 60),
+                              f"颜色: {self.current_color}  物象: {'、'.join(objs)}  回应者: {top.get('name','')}",
+                              font=ImageFont.truetype(fp, 28) if font else font, fill=(120, 100, 80))
+                    draw.text((100, y + 120),
+                              f"湖南大学 · 寻麓千年色 · {datetime.now().strftime('%Y.%m.%d %H:%M')}",
+                              font=ImageFont.truetype(fp, 24) if font else font, fill=(120, 100, 80))
+
+                    uploader = PostcardUploader()
+                    result = uploader.upload(card)
+                    self._send_main({
+                        "type": "postcard_result",
+                        "image_url": result["image_url"],
+                        "qr_base64": result["qr_base64"],
+                        "unique_id": result["unique_id"],
+                        "message": "扫码带走你的千年色。"
+                    })
+                    print(f"  [Postcard] 已上传: {result['image_url']}")
+                except Exception as e:
+                    print(f"  [Postcard] 上传失败: {e}")
 
     def _on_character_confirmed(self):
         print("  [FSM] 人物已确认!")
+        self._send_main({
+            "type": "character_confirmed",
+            "entity": self.selected_objects[-1] if self.selected_objects else ""
+        })
         self._send_gesture_state()
 
     def _on_reject_recommendations(self):
-        print("  [FSM] 拒绝推荐 → 进入轮盘")
+        print("  [FSM] 拒绝推荐 → 跳过轮盘")
 
     # ── 颜色提取回调 ─────────────────────────────────────────
 
     def _on_color_extraction_start(self):
-        """颜色提取开始：发送引导语到 Unity"""
+        """颜色提取开始"""
         print("  [FSM] 颜色提取开始")
         self._send_main({
             "type": "color_extraction_start",
-            "message": "我来提取你的底色",
+            "message": "请将随身之物靠近光中。让它替你说话。",
         })
 
     def _on_object_color_detected(self):
-        """物件颜色检测：分析当前画面中的物件主色"""
+        """物件颜色检测"""
         print("  [FSM] 触发物件颜色检测")
         if self.object_color_detector is None or self._current_frame is None:
-            # 检测器未就绪或无帧，触发衣物兜底
+            self._send_main({
+                "type": "object_color_failed",
+                "message": "无法读取画面，让我看看今天的你。"
+            })
             self.fsm.trigger_object_color_detected(False)
             return
 
         try:
             frame = self._current_frame
-            # 检测显著区域
             region = self.object_color_detector.detect_dominant_region(frame)
             if region is None:
-                print("  → 未检测到显著颜色区域，触发衣物兜底")
+                print("  → 未检测到显著颜色区域")
+                self._send_main({
+                    "type": "object_color_failed",
+                    "message": "这件物品的颜色太安静了，它没有进入这座书院的色谱。"
+                })
                 self.fsm.trigger_object_color_detected(False)
                 return
 
-            # 检测该区域颜色
             result = self.object_color_detector.detect(frame, region)
             if result is None:
-                print("  → 物件颜色未匹配六色，触发衣物兜底")
+                print("  → 物件颜色未匹配六色")
+                self._send_main({
+                    "type": "object_color_failed",
+                    "message": "这件物品的颜色太安静了，它没有进入这座书院的色谱。"
+                })
                 self.fsm.trigger_object_color_detected(False)
                 return
 
             # 匹配成功
-            print(f"  → 物件颜色: {result.color_name} (置信度: {result.confidence:.2f})")
             self.current_color = result.color_name
+            print(f"  → 物件颜色: {result.color_name} (置信度: {result.confidence:.2f})")
+            self._send_main({
+                "type": "object_color_detected",
+                "color": result.color_name,
+                "confidence": round(result.confidence, 3),
+                "source": "object",
+                "message": f"我捕捉到了一抹{result.color_name}。",
+            })
             self.fsm.trigger_object_color_detected(True)
         except Exception as e:
-            print(f"  → 物件颜色检测异常: {e}，触发衣物兜底")
+            print(f"  → 物件颜色检测异常: {e}")
+            self._send_main({
+                "type": "object_color_failed",
+                "message": "让我看看今天的你。"
+            })
             self.fsm.trigger_object_color_detected(False)
 
     def _on_clothing_fallback(self):
-        """衣物兜底：使用电脑端摄像头检测衣物颜色"""
-        print("  [FSM] 触发衣物兜底（摄像头）")
+        """衣物兜底"""
+        print("  [FSM] 触发衣物兜底")
         if self.webcam_color_detector is None:
             print("  → WebcamColorDetector 未就绪，使用默认墨色")
             self.current_color = "墨色"
+            self._send_main({
+                "type": "clothing_color_failed",
+                "message": "今天的你，颜色也不愿被命名。"
+            })
             self.fsm.trigger_clothing_color_detected(False)
             return
 
         try:
-            # 从电脑端摄像头读取帧
             webcam_frame = self.webcam_color_detector.read_frame()
             if webcam_frame is None:
                 print("  → 摄像头读取失败，使用默认墨色")
                 self.current_color = "墨色"
+                self._send_main({
+                    "type": "clothing_color_failed",
+                    "message": "今天的你，颜色也不愿被命名。"
+                })
                 self.fsm.trigger_clothing_color_detected(False)
                 return
 
-            # 检测衣物颜色
             color_name, confidence = self.webcam_color_detector.detect(webcam_frame)
             if color_name is None:
                 print("  → 衣物颜色未匹配六色，使用默认墨色")
                 self.current_color = "墨色"
+                self._send_main({
+                    "type": "clothing_color_failed",
+                    "message": "今天的你，颜色也不愿被命名。"
+                })
                 self.fsm.trigger_clothing_color_detected(False)
                 return
 
-            print(f"  → 衣物颜色: {color_name} (置信度: {confidence:.2f})")
             self.current_color = color_name
+            print(f"  → 衣物颜色: {color_name} (置信度: {confidence:.2f})")
+            self._send_main({
+                "type": "clothing_color_detected",
+                "color": color_name,
+                "confidence": round(confidence, 3),
+                "source": "clothing",
+                "message": f"那我看看今天的你。你今天穿着{color_name}。也许这就是你此刻的底色。"
+            })
             self.fsm.trigger_clothing_color_detected(True)
         except Exception as e:
             print(f"  → 衣物颜色检测异常: {e}，使用默认墨色")
             self.current_color = "墨色"
+            self._send_main({
+                "type": "clothing_color_failed",
+                "message": "有些颜色，不急着被命名。那就让墨色替你开始吧。"
+            })
             self.fsm.trigger_clothing_color_detected(False)
 
     def _on_color_confirmed(self):
-        """颜色确认：发送确认结果到 Unity"""
-        print(f"  [FSM] 颜色已确认: {self.current_color}")
+        """颜色确认"""
+        color = self.current_color or "岳麓绿"
+        print(f"  [FSM] 颜色已确认: {color}")
         self._send_main({
             "type": "color_confirmed",
-            "color": self.current_color,
-            "message": f"我看到了……你的颜色是{self.current_color}。",
+            "color": color,
+            "message": f"我看到了……你的颜色是{color}。",
         })
+        # 如果之前已经因为兜底到了 GLOBAL，不需要再次发送
+        if self.fsm and self.fsm.mode.value == "GLOBAL":
+            return
 
     def _run_camera_loop(self):
         from vision.hand_tracker import HAND_CONNECTIONS
@@ -845,9 +1062,10 @@ class _DirectCharacterBridge:
 
 def main():
     no_display = "--no-display" in sys.argv
+    no_camera = "--no-camera" in sys.argv
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     camera_url = args[0] if args else ""
-    server = IntegratedServer(camera_url=camera_url, no_display=no_display)
+    server = IntegratedServer(camera_url=camera_url, no_display=no_display, no_camera=no_camera)
     server.start()
 
 

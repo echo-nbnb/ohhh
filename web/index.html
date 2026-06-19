@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>寻麓千年色 - 交互界面</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%);
+            padding: 20px 30px;
+            border-bottom: 1px solid #0f3460;
+        }
+
+        header h1 {
+            font-size: 24px;
+            background: linear-gradient(90deg, #e94560, #f39c12);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .container {
+            display: flex;
+            flex: 1;
+            gap: 20px;
+            padding: 20px;
+        }
+
+        .panel {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #0f3460;
+        }
+
+        .left-panel { flex: 1; }
+        .right-panel { width: 400px; }
+
+        .video-container {
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            aspect-ratio: 4/3;
+        }
+
+        #camera-feed {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        #hand-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1);
+            pointer-events: none;
+        }
+
+        .status-bar {
+            margin-top: 15px;
+            padding: 12px;
+            background: #0f3460;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid #16213e;
+        }
+
+        .status-item:last-child { border-bottom: none; }
+
+        .status-label { color: #888; }
+        .status-value { color: #fff; font-weight: bold; }
+        .status-value.active { color: #e94560; }
+        .status-value.success { color: #27ae60; }
+
+        /* FSM状态显示 */
+        .fsm-state {
+            margin-top: 20px;
+        }
+
+        .fsm-title {
+            font-size: 16px;
+            color: #888;
+            margin-bottom: 10px;
+        }
+
+        .fsm-steps {
+            display: flex;
+            gap: 8px;
+        }
+
+        .fsm-step {
+            flex: 1;
+            padding: 12px 8px;
+            text-align: center;
+            background: #0f3460;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #666;
+            transition: all 0.3s;
+        }
+
+        .fsm-step.active {
+            background: #e94560;
+            color: #fff;
+            transform: scale(1.05);
+        }
+
+        .fsm-step.completed {
+            background: #27ae60;
+            color: #fff;
+        }
+
+        /* 操作按钮区 */
+        .actions {
+            margin-top: 20px;
+        }
+
+        .action-title {
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 10px;
+        }
+
+        .btn-group {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        button {
+            padding: 14px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #e94560, #c0392b);
+            color: #fff;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(233, 69, 96, 0.4);
+        }
+
+        .btn-secondary {
+            background: #0f3460;
+            color: #fff;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #1a4a7a;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #27ae60, #1e8449);
+            color: #fff;
+        }
+
+        .btn-success:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(39, 174, 96, 0.4);
+        }
+
+        /* 消息日志 */
+        .message-log {
+            margin-top: 20px;
+        }
+
+        .log-title {
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .log-content {
+            background: #0a0a1a;
+            border-radius: 8px;
+            padding: 10px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: "Consolas", "Courier New", monospace;
+            font-size: 12px;
+        }
+
+        .log-entry {
+            padding: 4px 0;
+            border-bottom: 1px solid #16213e;
+        }
+
+        .log-entry.send { color: #3498db; }
+        .log-entry.recv { color: #27ae60; }
+        .log-entry.info { color: #888; }
+        .log-entry.error { color: #e74c3c; }
+
+        .log-time { color: #666; margin-right: 8px; }
+        .log-type { font-weight: bold; margin-right: 8px; }
+
+        /* 检测结果区 */
+        .result-panel {
+            margin-top: 20px;
+        }
+
+        .result-card {
+            background: #0f3460;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+        }
+
+        .result-card h3 {
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: #e94560;
+        }
+
+        .result-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            font-size: 14px;
+        }
+
+        .result-label { color: #888; }
+        .result-value { color: #fff; font-weight: bold; }
+
+        /* 连接状态 */
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .connection-status.connected {
+            background: #27ae60;
+            color: #fff;
+        }
+
+        .connection-status.disconnected {
+            background: #e74c3c;
+            color: #fff;
+        }
+
+        /* 手势指示 */
+        .gesture-indicator {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            color: #fff;
+        }
+
+        .gesture-indicator.fist { background: #e94560; }
+        .gesture-indicator.open { background: #3498db; }
+        .gesture-indicator.index { background: #27ae60; }
+
+        /* 生成结果 */
+        .generation-result {
+            margin-top: 20px;
+            padding: 20px;
+            background: #0f3460;
+            border-radius: 8px;
+        }
+
+        .generation-result img {
+            width: 100%;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+
+        .narrative-text {
+            font-size: 14px;
+            line-height: 1.8;
+            color: #ddd;
+            margin-top: 15px;
+            padding: 15px;
+            background: #0a0a1a;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>寻麓千年色 - 交互界面</h1>
+    </header>
+
+    <div class="connection-status disconnected" id="ws-status">
+        连接中...
+    </div>
+
+    <div class="container">
+        <div class="left-panel panel">
+            <h2 style="margin-bottom:15px;font-size:18px;">摄像头画面</h2>
+
+            <div class="video-container">
+                <video id="camera-feed" autoplay playsinline></video>
+                <canvas id="hand-canvas"></canvas>
+                <div class="gesture-indicator" id="gesture-display">等待检测...</div>
+            </div>
+
+            <div class="status-bar">
+                <div class="status-item">
+                    <span class="status-label">当前阶段</span>
+                    <span class="status-value" id="current-act">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">FSM状态</span>
+                    <span class="status-value" id="fsm-mode">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">手势</span>
+                    <span class="status-value" id="gesture-type">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">手部位置</span>
+                    <span class="status-value" id="palm-pos">--</span>
+                </div>
+            </div>
+
+            <div class="fsm-state">
+                <div class="fsm-title">交互流程</div>
+                <div class="fsm-steps">
+                    <div class="fsm-step" id="step-1">第一幕<br>择色</div>
+                    <div class="fsm-step" id="step-2">第二幕<br>筑景</div>
+                    <div class="fsm-step" id="step-3">第三幕<br>唤灵</div>
+                    <div class="fsm-step" id="step-4">第四幕<br>成色</div>
+                </div>
+            </div>
+
+            <div class="actions">
+                <div class="action-title">操作面板</div>
+                <div class="btn-group">
+                    <button class="btn-primary" id="btn-start">开始交互</button>
+                    <button class="btn-secondary" id="btn-reset" disabled>重置</button>
+                    <button class="btn-success" id="btn-fist" disabled>握拳模拟</button>
+                    <button class="btn-secondary" id="btn-open" disabled>张开模拟</button>
+                    <button class="btn-success" id="btn-generate" disabled>触发生成</button>
+                    <button class="btn-secondary" id="btn-clear-log">清空日志</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="right-panel panel">
+            <div class="result-panel" id="color-result" style="display:none;">
+                <div class="result-card">
+                    <h3>第一幕 - 颜色</h3>
+                    <div class="result-item">
+                        <span class="result-label">检测颜色</span>
+                        <span class="result-value" id="detected-color">--</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">置信度</span>
+                        <span class="result-value" id="color-confidence">--</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">来源</span>
+                        <span class="result-value" id="color-source">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="result-panel" id="object-result" style="display:none;">
+                <div class="result-card">
+                    <h3>第二幕 - 物象</h3>
+                    <div class="result-item">
+                        <span class="result-label">识别物象</span>
+                        <span class="result-value" id="detected-object">--</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">置信度</span>
+                        <span class="result-value" id="object-confidence">--</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">QD类别</span>
+                        <span class="result-value" id="object-qdcat">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="result-panel" id="character-result" style="display:none;">
+                <div class="result-card">
+                    <h3>第三幕 - 人物</h3>
+                    <div class="result-item">
+                        <span class="result-label">推荐人物</span>
+                        <span class="result-value" id="detected-character">--</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">推荐理由</span>
+                        <span class="result-value" id="character-reason">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="generation-result" id="generation-result" style="display:none;">
+                <h3>第四幕 - 生成结果</h3>
+                <img id="result-image" src="" alt="生成结果">
+                <div class="narrative-text" id="result-narrative"></div>
+            </div>
+
+            <div class="message-log">
+                <div class="log-title">
+                    <span>消息日志</span>
+                    <span id="msg-count">0 条</span>
+                </div>
+                <div class="log-content" id="log-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+</html>
