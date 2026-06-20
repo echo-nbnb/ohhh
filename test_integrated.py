@@ -193,7 +193,7 @@ class IntegratedServer:
     def _init_gesture_fsm(self):
         print("[3] 初始化手势状态机...")
         from vision.gesture_state_machine import create_gesture_state_machine, GestureMode
-        self.fsm = create_gesture_state_machine()
+        self.fsm = create_gesture_state_machine(debounce_frames=3)
 
         # 回调：模式切换 → 发送到 Unity
         self.fsm.on_mode_change = self._on_fsm_mode_change
@@ -799,6 +799,18 @@ class IntegratedServer:
     def _run_camera_loop(self):
         from vision.hand_tracker import HAND_CONNECTIONS
         ts = 0
+
+        # 鼠标回调: 标定点选取
+        def on_mouse(event, x, y, flags, param):
+            if event == cv2.EVENT_LBUTTONDOWN and self.hand_tracker:
+                if self.hand_tracker.calibration_collecting:
+                    done = self.hand_tracker.add_calibration_point(x, y)
+                    if done:
+                        print("[标定] 完成！4点已选取，透视变换已启用")
+        if not self.no_display:
+            cv2.namedWindow("Hand + Gesture")
+            cv2.setMouseCallback("Hand + Gesture", on_mouse)
+
         while self.is_running:
             # ── 排空摄像头缓冲，只取最新帧 ──
             frame = None
@@ -891,12 +903,23 @@ class IntegratedServer:
                 if not self.no_display:
                     display = frame.copy()
 
+            # 标定画面叠加
+            if self.hand_tracker:
+                display = self.hand_tracker.draw_calibration_overlay(display)
+
             if not self.no_display:
                 cv2.imshow("Hand + Gesture", display)
 
             key = cv2.waitKey(1) & 0xFF
             if key == 27:  # ESC
                 break
+            elif key == ord('c') or key == ord('C'):
+                # 开始/重置标定
+                self.hand_tracker.start_calibration()
+                print("[标定] 请依次点击投影画面的 左上→右上→右下→左下")
+            elif key == ord('r') or key == ord('R'):
+                # 重置标定
+                self.hand_tracker.reset_calibration()
             elif ord('1') <= key <= ord('6'):
                 colors = ["岳麓绿", "书院红", "西迁黄", "湘江蓝", "校徽金", "墨色"]
                 self.current_color = colors[key - ord('1')]

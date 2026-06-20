@@ -94,7 +94,11 @@ class GestureStateMachine:
     内部自动检测手势、管理模式切换、触发回调。
     """
 
-    def __init__(self):
+    def __init__(self, debounce_frames: int = 3):
+        """
+        Args:
+            debounce_frames: 手势防抖帧数（展览环境建议 3，测试用 1）
+        """
         # 当前模式
         self.mode: GestureMode = GestureMode.COLOR_EXTRACTION  # 默认从颜色提取开始
         self.color_extraction_sub: ColorExtractionSubState = ColorExtractionSubState.AWAITING_OBJECT
@@ -123,6 +127,11 @@ class GestureStateMachine:
         self._still_start: float = 0.0
         self._still_threshold: float = 1.0  # 秒
         self._still_move_threshold: float = 20.0  # 像素
+
+        # 手势防抖: 连续 N 帧相同手势才确认
+        self._debounce_frames: int = debounce_frames
+        self._gesture_votes: dict = {}  # {GestureType: count}
+        self._confirmed_gesture: GestureType = GestureType.NONE
 
         # 回调
         self.on_mode_change: Optional[Callable[[str, str, str], None]] = None
@@ -153,12 +162,38 @@ class GestureStateMachine:
         """
         if landmarks is None or len(landmarks) < 21:
             self.hand_detected = False
+            self._gesture_votes.clear()
             self.current_gesture = GestureType.NONE
+            self._confirmed_gesture = GestureType.NONE
             return
 
         self.hand_detected = True
+
+        # 原始手势检测
+        raw_gesture = self._recognize_gesture(landmarks)
+
+        # 防抖: 连续 N 帧相同手势才确认
         self.prev_gesture = self.current_gesture
-        self.current_gesture = self._recognize_gesture(landmarks)
+        if raw_gesture != GestureType.NONE:
+            self._gesture_votes[raw_gesture] = self._gesture_votes.get(raw_gesture, 0) + 1
+            # 清理过期投票
+            for g in list(self._gesture_votes.keys()):
+                if g != raw_gesture:
+                    self._gesture_votes[g] = max(0, self._gesture_votes[g] - 1)
+                    if self._gesture_votes[g] <= 0:
+                        del self._gesture_votes[g]
+        else:
+            # 无手势时衰减所有投票
+            for g in list(self._gesture_votes.keys()):
+                self._gesture_votes[g] -= 1
+                if self._gesture_votes[g] <= 0:
+                    del self._gesture_votes[g]
+
+        # 达到阈值才更新确认手势
+        if self._gesture_votes.get(raw_gesture, 0) >= self._debounce_frames:
+            self._confirmed_gesture = raw_gesture
+
+        self.current_gesture = self._confirmed_gesture
 
         # 更新手掌位置
         self.prev_palm_x = self.palm_position[0]
@@ -431,7 +466,8 @@ class GestureStateMachine:
         }
 
         # 手指伸展检测：指尖 y < MCP y（MediaPipe 坐标系 y 向下）
-        threshold = 0.03
+        # 展览环境提高到 0.05，减少误触
+        threshold = 0.05
         extended = {
             name: tip_y < mcp_y - threshold
             for name, (tip_y, mcp_y) in tips.items()
@@ -507,8 +543,8 @@ class GestureStateMachine:
 # 工厂函数
 # ---------------------------------------------------------------------------
 
-def create_gesture_state_machine() -> GestureStateMachine:
-    return GestureStateMachine()
+def create_gesture_state_machine(debounce_frames: int = 3) -> GestureStateMachine:
+    return GestureStateMachine(debounce_frames=debounce_frames)
 
 
 # ---------------------------------------------------------------------------

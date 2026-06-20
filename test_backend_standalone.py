@@ -113,9 +113,9 @@ class BackendTester:
         self.recommender._ensure_kb()
         print(f"{G}  [OK]{Z} CharacterRecommender ({len(self.recommender._char_index)} 人物)")
 
-        # 3. Gesture FSM
+        # 3. Gesture FSM (测试用 debounce=1)
         print("[3] 初始化手势状态机...")
-        self.fsm = GestureStateMachine()
+        self.fsm = GestureStateMachine(debounce_frames=1)
         self._bind_fsm_callbacks()
         # Start in color extraction mode
         self.fsm.trigger_color_extraction_start()

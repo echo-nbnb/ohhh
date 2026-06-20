@@ -78,6 +78,15 @@ class ObjectColorDetector:
     def __init__(self):
         pass
 
+    def _preprocess(self, roi: np.ndarray) -> np.ndarray:
+        """白平衡 + 直方图均衡，适应展厅光照"""
+        # LAB 色彩空间的亮度均衡
+        lab = cv2.cvtColor(roi, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        l_eq = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(l)
+        lab_eq = cv2.merge([l_eq, a, b])
+        return cv2.cvtColor(lab_eq, cv2.COLOR_LAB2BGR)
+
     def detect(self, frame: np.ndarray,
                region: Optional[Tuple[int, int, int, int]] = None) -> Optional[ColorDetectionResult]:
         """
@@ -104,6 +113,9 @@ class ObjectColorDetector:
             roi = frame[y1:y2, x1:x2]
         else:
             roi = frame
+
+        # 白平衡校正 + 直方图均衡（适应展厅复杂光照）
+        roi = self._preprocess(roi)
 
         # 转换为HSV
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
