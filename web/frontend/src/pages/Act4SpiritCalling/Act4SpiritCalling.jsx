@@ -70,13 +70,13 @@ export default function Act4SpiritCalling({
     const payload = { scene: "act4-spirit-calling", colors: { primary: primaryColor, secondary: secondaryColor, firstColorName, secondColorName }, imagery: { first: firstImageryName, second: secondImageryName } };
     (async () => { try { const r = onFetchSpiritMatch ? await onFetchSpiritMatch(payload) : await mockFetchSpiritMatch(); if (mounted) setMatchData(r); } catch (e) { console.error(e); } })();
     const ts = [];
-    ts.push(setTimeout(() => setStage(STAGE.INTRO_2), 2600));
-    ts.push(setTimeout(() => setStage(STAGE.LOADING), 5700));
-    ts.push(setTimeout(() => setStage(STAGE.FOUND), 8600));
-    ts.push(setTimeout(() => setStage(STAGE.FRAME_EMPTY), 9800));
-    ts.push(setTimeout(() => setStage(STAGE.BLUE_TEXT), 11600));
-    ts.push(setTimeout(() => setStage(STAGE.YELLOW_TEXT), 17000));
-    ts.push(setTimeout(() => { setStage(STAGE.FINAL_REVEAL); if (onCompleteRef.current) setTimeout(() => onCompleteRef.current(), completeDelayRef.current); }, 22800));
+    ts.push(setTimeout(() => setStage(STAGE.INTRO_2), 3600));
+    ts.push(setTimeout(() => setStage(STAGE.LOADING), 8000));
+    ts.push(setTimeout(() => setStage(STAGE.FOUND), 12000));
+    ts.push(setTimeout(() => setStage(STAGE.FRAME_EMPTY), 13700));
+    ts.push(setTimeout(() => setStage(STAGE.BLUE_TEXT), 16200));
+    ts.push(setTimeout(() => setStage(STAGE.YELLOW_TEXT), 23800));
+    ts.push(setTimeout(() => { setStage(STAGE.FINAL_REVEAL); if (onCompleteRef.current) setTimeout(() => onCompleteRef.current(), completeDelayRef.current); }, 31900));
     return () => { mounted = false; ts.forEach(clearTimeout); };
   }, [primaryColor, secondaryColor, firstColorName, secondColorName, firstImageryName, secondImageryName, onFetchSpiritMatch]);
 

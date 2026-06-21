@@ -64,7 +64,7 @@ class DrawingSubState(Enum):
 
 class CandidateSubState(Enum):
     """第二幕物象确认状态（新流程：直接识别结果，等待确认/取消）"""
-    BROWSING = "browsing"    # 识别结果已发送到 Unity，等待用户确认（握拳）或取消（张手）
+    BROWSING = "browsing"    # 识别结果已发送到前端，等待用户确认（握拳）或取消（张手）
     CONFIRMED = "confirmed"  # 用户握拳确认
     CANCELLED = "cancelled"  # 用户张手取消
 
@@ -589,7 +589,7 @@ if __name__ == "__main__":
         return lm
 
     fsm = create_gesture_state_machine()
-    fsm.on_mode_change = lambda m, s, g: print(f"  → Unity: mode={m} sub={s} gesture={g}")
+    fsm.on_mode_change = lambda m, s, g: print(f"  → 前端: mode={m} sub={s} gesture={g}")
     fsm.on_drawing_commit = lambda traj: print(f"  → SketchBridge.commit() len={len(traj)}")
 
     print("=== 测试 1: GLOBAL + 食指伸出 → DRAWING ===")

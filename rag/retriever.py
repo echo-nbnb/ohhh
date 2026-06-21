@@ -211,7 +211,7 @@ class RAGRetriever:
                 "to": conn.to_module,
                 "connection_type": conn_type,
                 "meaning": combo_info.get("meaning", "") if combo_info else "",
-                "unity_style": style
+                "display_style": style
             })
 
         return results

@@ -93,8 +93,8 @@ export default function Act3FormingVision({ primaryColor = "#F2E700", secondaryC
     const ts = [];
     setSideLines(["颜色已经出现了。", "但它还没有形状。"]);
     setCenterLines([]);
-    ts.push(setTimeout(() => setCenterLines(["伸出食指，开始作画。"]), 1200));
-    ts.push(setTimeout(() => { setSideLines(["请画下此刻你想到的一个意象。"]); setCenterLines(["一棵树、一条河、一座山、一盏灯、一只鸟，", "或任何你想留下的形状。", "画完后点击右下角确认。"]); setDrawingEnabled(true); }, 3200));
+    ts.push(setTimeout(() => setCenterLines(["伸出食指，开始作画。"]), 1800));
+    ts.push(setTimeout(() => { setSideLines(["请画下此刻你想到的一个意象。"]); setCenterLines(["一棵树、一条河、一座山、一盏灯、一只鸟，", "或任何你想留下的形状。", "画完后点击右下角确认。"]); setDrawingEnabled(true); }, 4800));
     return () => ts.forEach(clearTimeout);
   }, []);
 
@@ -173,7 +173,7 @@ export default function Act3FormingVision({ primaryColor = "#F2E700", secondaryC
       setTimeout(() => {
         if (isLast) { setSideLines(["一个意象已经落下。", "它将被带往下一幕。"]); setCenterLines([]); setDrawingEnabled(false); setIsRecognizing(false); setTimeout(() => onComplete?.(), completeDelay); return; }
         setSideLines(["一个意象已经落下。", "你还想留下些什么？"]); setCenterLines(["继续画下另一个意象。", "画完后点击右下角确认。"]); setRound((p) => p + 1); setDrawingEnabled(true); setIsRecognizing(false);
-      }, 1400);
+      }, 2000);
     } catch (e) { console.error(e); setSideLines(["识别失败，请再试一次。"]); setCenterLines(["请重新绘制，或再次点击确认。"]); setDrawingEnabled(true); setIsRecognizing(false); }
   };
 

@@ -232,7 +232,7 @@ class AliCloudGenerator:
 
     def generate_realtime_description(self, entity_name: str, entity_context: Dict) -> str:
         """
-        实时生成单个模块的描述（用于Unity即时显示）
+        实时生成单个模块的描述（用于前端即时显示）
 
         Args:
             entity_name: 实体名称
@@ -662,7 +662,7 @@ class AliCloudGenerator:
         """
         图生图：基于底图 + 风格 prompt 生成新图像
 
-        颜色晕染底图（Unity 前端提供）+ 人物风格 prompt → 融合图像
+        颜色晕染底图（前端提供）+ 人物风格 prompt → 融合图像
 
         Args:
             prompt: 风格提示词（英文，由人物视觉风格决定）
@@ -774,7 +774,7 @@ class NarrativeGenerator:
         modules = context.get("modules", [])
         connections = context.get("connections", [])
 
-        # 生成本地连接描述（用于Unity即时显示）
+        # 生成本地连接描述（用于前端即时显示）
         connection_descriptions = []
         for conn in connections:
             from_entity = conn.get("from", "")
@@ -837,7 +837,7 @@ class NarrativeGenerator:
 
         Args:
             prompt: 风格提示词（英文）
-            base_image: 底图 Base64 或 URL（Unity 前端提供颜色晕染图）
+            base_image: 底图 Base64 或 URL（前端提供颜色晕染图）
             size: 分辨率
 
         Returns:

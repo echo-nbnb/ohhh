@@ -129,7 +129,7 @@ class RAGSystem:
                 "entity": "岳麓绿",
                 "description": "...",
                 "connections": [...],
-                "unity_data": {...}
+                "client_data": {...}
             }
         """
         if module_id not in self.modules:
@@ -167,8 +167,8 @@ class RAGSystem:
             module.entity, result.context
         )
 
-        # 构建Unity数据
-        unity_data = {
+        # 构建前端数据
+        client_data = {
             "node_color": result.context.get("color", "#FFFFFF"),
             "connections": conn_results
         }
@@ -178,7 +178,7 @@ class RAGSystem:
             "entity": module.entity,
             "description": description,
             "connections": conn_results,
-            "unity_data": unity_data
+            "client_data": client_data
         }
 
     def build_generation_context(self) -> Dict:

@@ -1,6 +1,6 @@
 # 寻麓千年色 · Web 正式前端框架
 
-《寻麓千年色》是一个关于湖南大学与湖湘文化的 AI 交互体验项目。当前 `web/` 使用 Vite、React、JavaScript 与 Tailwind CSS，替代原 Unity 展示层，并为已有 Python 颜色识别、MediaPipe 手势、草图识别、人物匹配和 RAG 叙事模块预留接入结构。
+《寻麓千年色》是一个关于湖南大学与湖湘文化的 AI 交互体验项目。当前 `web/` 使用 Vite、React、JavaScript 与 Tailwind CSS，替代原 前端展示层，并为已有 Python 颜色识别、MediaPipe 手势、草图识别、人物匹配和 RAG 叙事模块预留接入结构。
 
 ## 当前状态
 

@@ -180,10 +180,10 @@ export default function App() {
     setIsAutoAdvancing(true);
     addLog(`择色完成：读取为${detectedColor.name}`);
 
-    // Drive Act2 step progression
+    // Drive Act2 step progression (slowed down for pacing)
     setColorStep(2);
-    schedule(() => setColorStep(3), 1800);
-    schedule(() => setColorStep(4), 3600);
+    schedule(() => setColorStep(3), 2500);
+    schedule(() => setColorStep(4), 5000);
     // Act2's onComplete will advance to draw
   }, [addLog, clearTimers, schedule]);
 
@@ -319,7 +319,7 @@ export default function App() {
     // Demo mode: auto-trigger mock color detection after brief delay
     if (mode === "demo") {
       const result = mockDetectColor();
-      schedule(() => applyColorResult(result.color, result.source, result.confidence), 1800);
+      schedule(() => applyColorResult(result.color, result.source, result.confidence), 3000);
     }
   }, [addLog, mode, schedule, applyColorResult]);
 
@@ -440,18 +440,18 @@ export default function App() {
         return (
           <Act0
             onNext={goToTransition}
-            autoAdvanceDelay={mode === "demo" ? 3500 : 6000}
+            autoAdvanceDelay={mode === "demo" ? 5000 : 8000}
           />
         );
 
       case STAGES.TRANSITION:
         return (
           <Act1Entry
-            switchDelay={5000}
-            dissolveDelay={13000}
+            switchDelay={7000}
+            dissolveDelay={18000}
             onComplete={goToColor}
             onSkip={goToColor}
-            dissolveOnCompleteDelay={800}
+            dissolveOnCompleteDelay={1200}
           />
         );
 
@@ -462,9 +462,9 @@ export default function App() {
             recognizedColors={color ? [color.hex, color.hex] : []}
             copyByStep={buildAct2CopyByStep(color)}
             autoDemo={false}
-            stepDuration={4500}
+            stepDuration={6000}
             onComplete={goToDraw}
-            completeDelay={3000}
+            completeDelay={4000}
           />
         );
 
@@ -477,7 +477,7 @@ export default function App() {
             maxRounds={2}
             onRecognizeSketch={recognizeSketch}
             onComplete={goToSpirit}
-            completeDelay={2000}
+            completeDelay={3000}
             remotePoints={mode === "live" ? points : []}
           />
         );
@@ -495,7 +495,7 @@ export default function App() {
             secondImageryName={a4.secondImageryName}
             onFetchSpiritMatch={fetchSpiritMatch}
             onComplete={goToPostcard}
-            completeDelay={4000}
+            completeDelay={5000}
           />
         );
       }

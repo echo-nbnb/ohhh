@@ -7,7 +7,7 @@
   2. 初始化手部跟踪 (MediaPipe)
   3. 运行手势状态机 (5 模式)
   4. 接驳草图识别 + 人物推荐桥接
-  5. 双端口与 Unity 通信 (:8888 主通道, :8889 手部通道)
+  5. 双端口 TCP 通信 (:8888 主通道, :8889 手部通道)
 
 用法:
   python test_integrated.py [摄像头URL]
@@ -97,9 +97,9 @@ class IntegratedServer:
         self.webcam_color_detector = None  # 衣物颜色检测
 
         # Socket
-        self.main_socket: Optional[socket.socket] = None     # :8888 → Unity
-        self.hand_socket: Optional[socket.socket] = None     # :8889 → Unity
-        self.main_client: Optional[socket.socket] = None     # Unity 连接
+        self.main_socket: Optional[socket.socket] = None     # :8888 → 前端
+        self.hand_socket: Optional[socket.socket] = None     # :8889 → 前端
+        self.main_client: Optional[socket.socket] = None     # 前端连接
         self.hand_client: Optional[socket.socket] = None
         self.main_server: Optional[socket.socket] = None
         self.hand_server: Optional[socket.socket] = None
@@ -150,7 +150,7 @@ class IntegratedServer:
         self._init_bridges()
 
         # 6. 主循环
-        print("\n[运行] 等待 Unity 连接...")
+        print("\n[运行] 等待 前端连接...")
         if self.no_display:
             print("[模式] 无显示 — 延迟最低")
         else:
@@ -221,7 +221,7 @@ class IntegratedServer:
         from vision.gesture_state_machine import create_gesture_state_machine, GestureMode
         self.fsm = create_gesture_state_machine(debounce_frames=1)
 
-        # 回调：模式切换 → 发送到 Unity
+        # 回调：模式切换 → 发送到前端
         self.fsm.on_mode_change = self._on_fsm_mode_change
 
         # 回调：颜色提取开始
@@ -326,7 +326,7 @@ class IntegratedServer:
         self.main_server.settimeout(1.0)
         t1 = threading.Thread(target=self._accept_main, daemon=True, name="MainAccept")
         t1.start()
-        print("[OK] 主通道 :8888 等待 Unity...")
+        print("[OK] 主通道 :8888 等待前端...")
 
         # :8889 手部通道
         self.hand_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -336,14 +336,14 @@ class IntegratedServer:
         self.hand_server.settimeout(1.0)
         t2 = threading.Thread(target=self._accept_hand, daemon=True, name="HandAccept")
         t2.start()
-        print("[OK] 手部通道 :8889 等待 Unity...")
+        print("[OK] 手部通道 :8889 等待前端...")
 
     def _accept_main(self):
         while self.is_running:
             try:
                 client, addr = self.main_server.accept()
                 client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                print(f"\n[Unity] 主通道已连接: {addr}")
+                print(f"\n[前端] 主通道已连接: {addr}")
                 self.main_client = client
                 # 新连接 → 重置状态
                 self.selected_objects.clear()
@@ -370,7 +370,7 @@ class IntegratedServer:
             try:
                 client, addr = self.hand_server.accept()
                 client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                print(f"[Unity] 手部通道已连接: {addr}")
+                print(f"[前端] 手部通道已连接: {addr}")
                 self.hand_client = client
                 self._send_hand({"type": "connected",
                                  "message": "hand_server_ready"})
@@ -381,7 +381,7 @@ class IntegratedServer:
                     logger.error(f"Hand accept 错误: {e}")
 
     def _handle_main_loop(self, client: socket.socket):
-        """处理来自 Unity 的消息（用 select 隔离收发，不影响 sendall）"""
+        """处理来自前端的消息（用 select 隔离收发，不影响 sendall）"""
         import select
         buf = ""
         while self.is_running:
@@ -399,14 +399,14 @@ class IntegratedServer:
                         self._process_main_message(line.strip())
             except Exception:
                 break
-        print("[Unity] 主通道断开")
+        print("[前端] 主通道断开")
         self.main_client = None
 
     def _process_main_message(self, msg: str):
         try:
             data = json.loads(msg)
             msg_type = data.get("type", data.get("event", ""))
-            print(f"[Unity→] {msg_type}: {json.dumps(data, ensure_ascii=False)[:120]}")
+            print(f"[前端→] {msg_type}: {json.dumps(data, ensure_ascii=False)[:120]}")
 
             if msg_type == "gesture_simulate":
                 # TCP 手势模拟（测试用）
@@ -459,7 +459,7 @@ class IntegratedServer:
                 print(f"  → 未处理的消息类型: {msg_type}")
 
         except json.JSONDecodeError:
-            print(f"[Unity→] JSON 解析失败: {msg[:100]}")
+            print(f"[前端→] JSON 解析失败: {msg[:100]}")
 
     # ── 发送方法 ───────────────────────────────────────────
 
@@ -494,7 +494,7 @@ class IntegratedServer:
                 "sub_state": self.fsm.sub_state,
                 "gesture": self.fsm.current_gesture.value if self.fsm.current_gesture else "none",
             }
-            print(f"  [FSM→Unity] {data['mode']}/{data['sub_state']}/{data['gesture']}")
+            print(f"  [FSM→前端] {data['mode']}/{data['sub_state']}/{data['gesture']}")
             self._send_main(data)
 
     # ── FSM 回调 ───────────────────────────────────────────
@@ -920,10 +920,10 @@ class IntegratedServer:
                         f"mcp_y=[{get_y(6):.3f},{get_y(10):.3f},{get_y(14):.3f},{get_y(18):.3f}] | "
                         f"tray={len(self.fsm.trajectory)} | "
                         f"color={self.current_color} | "
-                        f"unity={'OK' if self.main_client else '--'}"
+                        f"ws={'OK' if self.main_client else '--'}"
                     )
 
-                # → Unity 手部数据（从已检测结果直接计算像素坐标）
+                # → 前端 手部数据（从已检测结果直接计算像素坐标）
                 pixel_landmarks = [(int(lm.x * w), int(lm.y * h)) for lm in hand_lm]
                 palm_x = sum(p[0] for p in pixel_landmarks) // 21
                 palm_y = sum(p[1] for p in pixel_landmarks) // 21
@@ -985,7 +985,7 @@ class IntegratedServer:
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
                     cv2.putText(display, f"Color: {self.current_color}", (10, 90),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-                    u_status = "Unity: OK" if self.main_client else "Unity: --"
+                    u_status = "前端: OK" if self.main_client else "前端: --"
                     u_color = (0, 255, 0) if self.main_client else (0, 0, 255)
                     cv2.putText(display, u_status, (10, h - 20),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, u_color, 2)
@@ -1057,7 +1057,7 @@ class IntegratedServer:
             # 清除屏幕并打印状态
             print(f"\rMode={mode:16s} Sub={sub:12s} Gesture={gest:16s} Traj={pts:4d}  "
                   f"Color={self.current_color:6s}  "
-                  f"Unity={'OK' if self.main_client else '--'}  "
+                  f"前端={'OK' if self.main_client else '--'}  "
                   f"[1=食指 2=握拳 3=张手 ESC=退出]",
                   end="", flush=True)
 
@@ -1124,7 +1124,7 @@ class IntegratedServer:
         print("\n[退出] 集成服务器已停止")
 
 
-# ── 直接桥接（不经过 UnitySender，直接回调到 IntegratedServer）─
+# ── 直接桥接（不经过 前端Sender，直接回调到 IntegratedServer）─
 
 class _DirectSketchBridge:
     """草图识别桥接 — 直接发送到集成服务器"""
@@ -1179,7 +1179,7 @@ class _DirectCharacterBridge:
                 "type": "character_candidates",
                 "candidates": candidates,
             })
-            print(f"  → 已发送 {len(candidates)} 个人物推荐到 Unity")
+            print(f"  → 已发送人物推荐到前端")
             return candidates
         except Exception as e:
             logger.error(f"CharacterBridge 推荐失败: {e}")

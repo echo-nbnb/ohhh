@@ -288,9 +288,9 @@ class HandTracker:
         avg_y = sum(p[1] for p in history) // len(history)
         return (avg_x, avg_y)
 
-    def get_data_for_unity(self, frame: np.ndarray,
+    def get_data_for_client(self, frame: np.ndarray,
                            timestamp_ms: int = 0) -> Optional[dict]:
-        """获取发送给 Unity/前端 的数据格式"""
+        """获取发送给 前端 的数据格式"""
         hand = self.get_hand_position(frame, timestamp_ms)
         if hand is None:
             return None

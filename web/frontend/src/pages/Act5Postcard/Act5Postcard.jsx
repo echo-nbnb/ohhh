@@ -61,7 +61,7 @@ export default function Act5Postcard({ postcardData = MOCK_DATA, debugStage, aut
 
   useEffect(() => {
     if (!autoPlay || debugStage !== undefined) return;
-    const ts = [setTimeout(() => setStage(STAGE.PLACES_AND_BRIDGE), 2600), setTimeout(() => setStage(STAGE.TREE_APPEAR), 5200), setTimeout(() => setStage(STAGE.DISKS_APPEAR), 7800), setTimeout(() => setStage(STAGE.TITLE_BG_APPEAR), 10400), setTimeout(() => setStage(STAGE.TOP_TITLE_APPEAR), 13000), setTimeout(() => setStage(STAGE.OBJECT_TEXT_APPEAR), 15800), setTimeout(() => setStage(STAGE.AI_TEXT_APPEAR), 18600), setTimeout(() => setStage(STAGE.TRACE_APPEAR), 21400), setTimeout(() => setStage(STAGE.SEAL_READY), 24200), setTimeout(() => { setStage(STAGE.FINAL_POSTCARD); if (onCompleteRef.current) setTimeout(() => onCompleteRef.current(), completeDelayRef.current); }, 27200)];
+    const ts = [setTimeout(() => setStage(STAGE.PLACES_AND_BRIDGE), 3600), setTimeout(() => setStage(STAGE.TREE_APPEAR), 7300), setTimeout(() => setStage(STAGE.DISKS_APPEAR), 10900), setTimeout(() => setStage(STAGE.TITLE_BG_APPEAR), 14600), setTimeout(() => setStage(STAGE.TOP_TITLE_APPEAR), 18200), setTimeout(() => setStage(STAGE.OBJECT_TEXT_APPEAR), 22100), setTimeout(() => setStage(STAGE.AI_TEXT_APPEAR), 26000), setTimeout(() => setStage(STAGE.TRACE_APPEAR), 30000), setTimeout(() => setStage(STAGE.SEAL_READY), 33900), setTimeout(() => { setStage(STAGE.FINAL_POSTCARD); if (onCompleteRef.current) setTimeout(() => onCompleteRef.current(), completeDelayRef.current); }, 38100)];
     return () => ts.forEach(clearTimeout);
   }, [autoPlay, debugStage]);
 
