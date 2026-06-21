@@ -44,7 +44,16 @@
       "Bash(cp \"/c/Users/lenovo/Downloads/外周转环.svg\" D:/projects/ohhh/web/frontend/src/assets/act2/orbit-ring.svg)",
       "Read(//d/xwechat_files/wxid_zocnnocrvmu622_5031/msg/file/2026-06/SpiritModule/**)",
       "Bash(npm run *)",
-      "Bash(start *)"
+      "Bash(start *)",
+      "Bash(git commit -m 'feat: 五幕美术深化 + 完整前端组件体系 *)",
+      "Bash(git branch *)",
+      "Bash(taskkill /f /pid 7256)",
+      "Bash(taskkill /f /pid 37224)",
+      "Bash(taskkill /f /pid 36148)",
+      "Bash(taskkill /f /pid 36556)",
+      "Bash(taskkill /f /pid 38584)",
+      "Bash(powershell -Command \"Stop-Process -Id 36148,36556,38584 -Force\")",
+      "Bash(git rm *)"
     ]
   }
 }

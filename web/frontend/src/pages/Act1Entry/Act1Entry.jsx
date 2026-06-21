@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import "./Act1Entry.css";
 
 import bgUrl from "../../assets/act1/act1-bg.svg";
@@ -50,16 +50,16 @@ export default function Act1Entry({ switchDelay = 5000, dissolveDelay = 13000, o
   }, [switchDelay, dissolveDelay]);
 
   // Handler for dissolve completion: white screen → brief hold → advance
-  const handleDissolveDone = () => {
+  const handleDissolveDone = useCallback(() => {
     setPhase("dissolved");
     if (onComplete) {
       setTimeout(() => onComplete(), dissolveOnCompleteDelay);
     }
-  };
+  }, [onComplete, dissolveOnCompleteDelay]);
 
-  const handleSkip = () => {
+  const handleSkip = useCallback(() => {
     onSkip?.();
-  };
+  }, [onSkip]);
 
   return (
     <section className={`act1${isDissolving ? " act1--fading" : ""}`} onClick={onSkip ? handleSkip : undefined} style={onSkip ? { cursor: "pointer" } : undefined}>

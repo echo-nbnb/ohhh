@@ -23,6 +23,8 @@ function createParticles(count = 60) {
 export default function DissolveOverlay({ active, onDone }) {
   const [stage, setStage] = useState("idle");
   const particles = useMemo(() => createParticles(80), []);
+  const onDoneRef = useRef(onDone);
+  useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
 
   useEffect(() => {
     if (active && stage === "idle") {
@@ -30,11 +32,11 @@ export default function DissolveOverlay({ active, onDone }) {
       const maxDuration = 3.0 + 0.8 + 0.6; // longest particle + delay + white fade
       const timer = setTimeout(() => {
         setStage("done");
-        onDone?.();
+        onDoneRef.current?.();
       }, maxDuration * 1000 + 200);
       return () => clearTimeout(timer);
     }
-  }, [active, stage, onDone]);
+  }, [active, stage]); // removed onDone from deps — use ref instead
 
   if (stage === "idle") return null;
   if (stage === "done") return <div className="dissolve-white" />;

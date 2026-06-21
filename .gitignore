@@ -13,3 +13,8 @@ rag/oss_config.py
 *.log
 start_all.bat
 start_all.sh
+__pycache__/
+.idea/
+output/
+*.log
+!web/frontend/MIGRATION.md

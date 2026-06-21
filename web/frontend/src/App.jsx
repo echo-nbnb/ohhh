@@ -184,14 +184,7 @@ export default function App() {
     setColorStep(2);
     schedule(() => setColorStep(3), 1800);
     schedule(() => setColorStep(4), 3600);
-
-    // After Act2 step 4, advance to draw
-    schedule(() => {
-      setCurrentStage(STAGES.DRAW);
-      setGesture((current) => latestRef.current.mode === "demo" ? "index_pointing" : current);
-      setIsAutoAdvancing(false);
-      addLog("自动进入第二幕：筑景");
-    }, 6600);
+    // Act2's onComplete will advance to draw
   }, [addLog, clearTimers, schedule]);
 
   const applyObjectResult = useCallback((recognizedObject) => {
@@ -319,21 +312,25 @@ export default function App() {
 
   // ── Stage transition handlers ──
 
+  const goToColor = useCallback(() => {
+    setCurrentStage(STAGES.COLOR);
+    setColorStep(1);
+    addLog("入境完成，进入寻色");
+    // Demo mode: auto-trigger mock color detection after brief delay
+    if (mode === "demo") {
+      const result = mockDetectColor();
+      schedule(() => applyColorResult(result.color, result.source, result.confidence), 1800);
+    }
+  }, [addLog, mode, schedule, applyColorResult]);
+
   const goToTransition = useCallback(() => {
     if (showAct1Transition) {
       setCurrentStage(STAGES.TRANSITION);
       addLog("入境：一封来自千年前的邀请");
     } else {
-      setCurrentStage(STAGES.COLOR);
-      addLog("跳过入境，直接进入寻色");
+      goToColor();
     }
-  }, [addLog, showAct1Transition]);
-
-  const goToColor = useCallback(() => {
-    setCurrentStage(STAGES.COLOR);
-    setColorStep(1);
-    addLog("入境完成，进入寻色");
-  }, [addLog]);
+  }, [addLog, showAct1Transition, goToColor]);
 
   const goToDraw = useCallback(() => {
     setCurrentStage(STAGES.DRAW);
