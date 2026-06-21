@@ -159,23 +159,40 @@ class IntegratedServer:
     # ── 摄像头 ─────────────────────────────────────────────
 
     def _init_camera(self) -> bool:
+        # 优先用电脑摄像头
+        print(f"\n[1] 打开电脑摄像头 (device=0)...")
+        try:
+            self.camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            if self.camera.isOpened():
+                # 设置分辨率
+                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                w = self.camera.get(cv2.CAP_PROP_FRAME_WIDTH)
+                h = self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                print(f"[OK] 电脑摄像头已就绪 ({int(w)}x{int(h)})")
+                return True
+        except Exception as e:
+            print(f"     电脑摄像头失败: {e}")
+
+        # 兜底: IP 摄像头
         url = self.camera_url
         if not url:
             try:
                 from config_ipcam import CAMERA_URL
                 url = CAMERA_URL
             except ImportError:
-                url = "http://10.194.3.133:8080/video"
+                url = ""
+        if url and "YOUR_CAMERA" not in url:
+            print(f"     尝试 IP 摄像头: {url}")
+            try:
+                from vision.ipcamera import IPCamera
+                self.camera = IPCamera(url)
+                if self.camera.connect():
+                    print("[OK] IP摄像头已连接")
+                    return True
+            except Exception as e:
+                print(f"     IP摄像头失败: {e}")
 
-        print(f"\n[1] 连接摄像头: {url}")
-        try:
-            from vision.ipcamera import IPCamera
-            self.camera = IPCamera(url)
-            if self.camera.connect():
-                print("[OK] 摄像头已连接")
-                return True
-        except Exception as e:
-            print(f"     连接失败: {e}")
         return False
 
     def _init_hand_tracker(self):
@@ -815,8 +832,8 @@ class IntegratedServer:
             # ── 排空摄像头缓冲，只取最新帧 ──
             frame = None
             for _ in range(4):
-                f = self.camera.read_frame()
-                if f is not None:
+                ret, f = self.camera.read()
+                if ret and f is not None:
                     frame = f
 
             if frame is None:
@@ -870,6 +887,15 @@ class IntegratedServer:
                     print(f"  [COVER_FLOW] hand_appeared sent! palm=({palm_x}, {palm_y})")
 
                 self._prev_hand_detected = True
+
+                # ── drawing_point: 绘画模式下发送食指指尖到前端 ──
+                if self.fsm.is_drawing and self.main_client:
+                    index_tip = fingertips[1]  # 食指指尖
+                    self._send_main({
+                        "type": "drawing_point",
+                        "x": index_tip[0],
+                        "y": index_tip[1],
+                    })
 
                 # ── 可视化（仅在非 --no-display 模式） ──
                 if not self.no_display:
@@ -1067,7 +1093,8 @@ class _DirectCharacterBridge:
                 return []
             candidates = [
                 {"name": r.name, "title": r.title,
-                 "score": round(r.score, 4), "reason": r.reason}
+                 "score": round(r.score, 4), "reason": r.reason,
+                 "monologue": r.monologue, "spiritLine": r.spiritLine}
                 for r in results
             ]
             self.server._send_main({

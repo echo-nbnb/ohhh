@@ -20,6 +20,8 @@ class RecommendResult:
     title: str              # 称号
     score: float            # 综合得分 (0~1)
     reason: str             # 推荐理由
+    monologue: list = field(default_factory=list)   # 第一人称台词
+    spiritLine: str = ""    # 精神金句
 
 
 # ---------------------------------------------------------------------------
@@ -400,11 +402,20 @@ class CharacterRecommender:
         results = []
         for name, score, reason in scored:
             data = self._char_index.get(name, {})
+            desc = data.get("description", "")
+            spirit = data.get("spirit", "")
+            title = data.get("title", "")
             results.append(RecommendResult(
                 name=name,
-                title=data.get("title", ""),
+                title=title,
                 score=round(score, 3),
                 reason=reason,
+                monologue=[
+                    f"后来者，我是{name}。",
+                    f"我曾在岳麓山下，{desc}。",
+                    f"你的选择，让我想起了当年的自己。"
+                ],
+                spiritLine=f"{spirit}——{name}，{title}",
             ))
         return results
 
