@@ -95,26 +95,6 @@ CHARACTER_GROUP_STYLE = {
             "contemporary documentary photography, thoughtful composition"
         ),
     },
-    "校园角色": {
-        "era": "现代",
-        "style": "写实",
-        "visual_prompt": (
-            "contemporary campus slice of life, warm sunlight through old trees, "
-            "natural candid photography, youthful nostalgic atmosphere, "
-            "modern Chinese aesthetic with classical undertones, soft focus edges"
-        ),
-    },
-    # 跨时代 → 穿越风 (古今融合)
-    "抽象意象": {
-        "era": "跨时代",
-        "style": "穿越风",
-        "visual_prompt": (
-            "surreal time-travel fusion, ancient ink painting dissolving into digital art, "
-            "double exposure technique, anachronistic elements in harmony, "
-            "dreamlike temporal blur, traditional motifs rendered in contemporary media, "
-            "past and present coexisting in one frame"
-        ),
-    },
 }
 
 # 人物名 → 分组 的懒加载索引
@@ -133,10 +113,6 @@ def _build_character_group_index():
         "维新革命": ["谭嗣同", "魏源", "黄兴", "蔡锷", "宋教仁", "陈天华"],
         "现代学人": ["毛泽东", "杨昌济", "何叔衡", "李达", "成仿吾", "周谷城", "何长工",
                      "熊十力", "冯友兰", "钱基博", "金岳霖", "梁漱溟", "胡庶华"],
-        "校园角色": ["学子", "教师", "研究者", "新生", "毕业生", "图书管理员", "古籍修复师",
-                     "志愿者", "讲解员", "辅导员", "留学生", "食堂师傅"],
-        "抽象意象": ["理学之魂", "书院守望者", "湘江行者", "知识火种者", "文化摆渡人",
-                     "思想叩问者", "未来开拓者"],
     }.items():
         for name in members:
             _character_group_index[name] = group_name
@@ -151,8 +127,8 @@ def get_character_style(character_name: str) -> dict:
         未匹配时返回默认现代写实风格
     """
     _build_character_group_index()
-    group = _character_group_index.get(character_name, "校园角色")
-    return CHARACTER_GROUP_STYLE.get(group, CHARACTER_GROUP_STYLE["校园角色"])
+    group = _character_group_index.get(character_name, "现代学人")
+    return CHARACTER_GROUP_STYLE.get(group, CHARACTER_GROUP_STYLE["现代学人"])
 
 
 class AliCloudGenerator:
