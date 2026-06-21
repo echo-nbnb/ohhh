@@ -333,6 +333,7 @@ export default function App() {
   }, [addLog, showAct1Transition, goToColor]);
 
   const goToDraw = useCallback(() => {
+    console.log("[App] goToDraw - transitioning to Act3, color:", latestRef.current.color);
     setCurrentStage(STAGES.DRAW);
     setIsAutoAdvancing(false);
     addLog("择色完成，进入第二幕：筑景");
@@ -458,7 +459,7 @@ export default function App() {
         return (
           <Act2ColorSeeking
             step={colorStep}
-            recognizedColors={color ? [color.hex] : []}
+            recognizedColors={color ? [color.hex, color.hex] : []}
             copyByStep={buildAct2CopyByStep(color)}
             autoDemo={false}
             stepDuration={4500}

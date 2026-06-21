@@ -1,109 +1,20 @@
-# 寻麓千年色 · 智能交互装置
+# 寻麓千年色
 
-> 湖南大学设计艺术学院 · 智能设计方法课程 · 大二下学期
+> 湖南大学设计艺术学院 · AI 驱动手势交互装置
 
----
-
-## 项目概述
-
-**寻麓千年色** 是一个以湖湘文化为底蕴的 **AI 驱动手势交互装置**。
-
-用户全程通过**手部动作**与投影画面交互——摄像头实时捕捉手部 21 个关键点，AI 识别手势意图（绘画、选择、确认），驱动四幕叙事体验。从选择颜色、手势绘画物象，到 AI 推荐历史人物、生成个性化精神画像，形成完整的沉浸式文化叙事体验。
-
-**"寻麓千年色"** —— 不是在找颜色，而是在寻找湖大千年精神中属于"我"的那一抹色彩。
+用户通过**摄像头 + 手势**与投影画面交互——择色、筑景、唤灵、成笺，五幕沉浸式湖湘文化叙事体验。
 
 ---
 
-## 技术架构
+## 技术栈
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           摄像头（IP Camera / USB）                       │
-│                         俯拍桌面：物件/衣物颜色 + 手部                    │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │
-         ┌───────────────────────┼───────────────────────┐
-         │                       │                       │
-         ▼                       ▼                       ▼
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│ HSV + MediaPipe │  │   MediaPipe     │  │   QuickDraw     │
-│  颜色检测       │  │   手部追踪      │  │   CNN 草图识别   │
-│  (物件/衣物)   │  │   21关键点/30fps │  │   (82类/ONNX)  │
-└────────┬────────┘  └────────┬────────┘  └────────┬────────┘
-         │                     │                     │
-         └─────────────────────┼─────────────────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │    Bridge 层         │
-                    │  color_detector /    │
-                    │  sketch / character   │
-                    └──────────┬──────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │  RAG 检索生成引擎     │
-                    │  知识库 + LLM 生成   │
-                    │  Wan 2.7 图生图     │
-                    └──────────┬──────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │  双端口 TCP 服务器    │
-                    │  :8888 主通道        │
-                    │  :8889 手部通道      │
-                    └──────────┬──────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │      Unity 渲染端     │
-                    │  实时渲染 + 投影     │
-                    └─────────────────────┘
-```
-
----
-
-## 目录
-
-- [快速开始](#快速开始)
-- [项目结构](#项目结构)
-- [四幕叙事流程](#四幕叙事流程)
-- [手势交互](#手势交互)
-- [技术模块详解](#技术模块详解)
-- [训练教程](#训练教程)
-- [常见问题](#常见问题)
-
----
-
-## 快速开始
-
-### 环境配置
-
-```bash
-# 1. 创建并激活环境
-conda create -n ohhh python=3.12
-conda activate ohhh
-
-# 2. 安装依赖
-pip install -r requirements.txt
-```
-
-### 运行测试
-
-```bash
-# 端到端集成测试（需要 IP 摄像头）
-python test_integrated.py
-
-# 快速测试（无摄像头，mock 模式）
-python test_integrated_fast.py
-
-# 测试图像生成（无需摄像头）
-python test_generation_full.py
-```
-
-### 配置摄像头
-
-编辑 `config_ipcam.py`：
-
-```python
-CAMERA_URL = "http://你的摄像头IP:8080/video"
-```
+| 层 | 技术 |
+|---|------|
+| 前端 | React 18 + Vite + Tailwind CSS + WebGL (OGL) |
+| 后端桥接 | Python WebSocket + TCP |
+| 视觉 | MediaPipe 手部追踪 + HSV 颜色检测 + QuickDraw 草图识别 |
+| AI | 阿里云百炼 DashScope (Qwen / Wan 2.7) |
+| 存储 | 阿里云 OSS |
 
 ---
 
@@ -111,273 +22,134 @@ CAMERA_URL = "http://你的摄像头IP:8080/video"
 
 ```
 ohhh/
-├── vision/                          # 视觉模块
-│   ├── color_detector.py           # 颜色提取（物件HSV主色）
-│   ├── webcam_color_detector.py    # 衣物颜色提取（MediaPipe三种方法）
-│   ├── hand_detector.py             # MediaPipe 手部检测
-│   ├── hand_tracker.py              # 手部追踪封装
-│   ├── gesture_state_machine.py     # 手势状态机（6模式）
-│   ├── sketch_recognizer.py        # QuickDraw 草图识别
-│   ├── ipcamera.py                 # IP 摄像头连接
-│   └── quickdraw/                   # QuickDraw CNN 模型
+├── vision/                          # 计算机视觉
+│   ├── hand_tracker.py              # MediaPipe 手部 21 关键点追踪
+│   ├── gesture_state_machine.py     # 6 模式手势 FSM
+│   ├── color_detector.py            # HSV 物件颜色检测（六色匹配）
+│   ├── webcam_color_detector.py     # 衣物颜色兜底检测
+│   ├── sketch_recognizer.py         # QuickDraw 82 类草图识别
+│   └── *.task / *.tflite           # MediaPipe 模型文件
 │
-├── rag/                             # RAG 检索生成
-│   ├── retriever.py                # 知识库检索引擎
-│   ├── generator.py                 # LLM 叙事生成（阿里云百炼）
-│   ├── character_recommend.py       # 人物推荐引擎
-│   ├── postcard.py                  # 明信片合成
-│   └── knowledge/                   # 知识库
-│       ├── entities/                # 208 实体（颜色23/物象88/人物97）
-│       ├── combinations/            # 107 组合解读
-│       └── templates/               # 100 叙事模板
+├── rag/                             # RAG 检索引擎
+│   ├── character_recommend.py       # 35 人物推荐（颜色+物象）
+│   ├── generator.py                 # LLM 叙事生成
+│   ├── retriever.py                 # 知识库检索
+│   └── knowledge/                   # 实体 + 组合 + 模板
 │
-├── unity_bridge/                    # Unity 通信
-│   ├── server.py                    # 双端口 TCP 服务器
-│   ├── sender.py                    # 数据发送器
-│   ├── sketch_bridge.py            # 草图→物象桥接
-│   └── character_bridge.py          # 人物推荐桥接
+├── web/                             # Web 层
+│   ├── ws_server.py                 # WebSocket 桥接 (:8080 → TCP :8888/:8889)
+│   └── frontend/                    # React 前端
+│       └── src/
+│           ├── pages/               # 五幕 + 开场组件
+│           │   ├── Act0/            # 第零幕 · 开场
+│           │   ├── Act1Entry/       # 第一幕 · 入境
+│           │   ├── Act2ColorSeeking/# 第二幕 · 寻色
+│           │   ├── Act3FormingVision/# 第三幕 · 筑景
+│           │   ├── Act4SpiritCalling/# 第四幕 · 唤灵（流程版）
+│           │   └── Act5Postcard/    # 第五幕 · 成笺
+│           ├── SpiritModule/        # 唤灵模块（可移植）
+│           ├── components/          # 共享组件 (LiquidChrome)
+│           └── assets/              # SVG 美术资源 (act0~act5)
 │
-├── proposal/                        # 设计文档
-│   ├── interaction.md              # 交互设计详述
-│   └── technical.md                # 技术分析与实现
+├── docs/                            # 文档
+│   ├── interaction.md               # 交互设计文档
+│   └── technical.md                 # 技术架构文档
 │
-├── test_integrated.py              # 端到端集成测试
-├── test_generation_full.py         # 图像生成测试
-└── config_ipcam.py                 # 摄像头配置
+├── test_integrated.py               # 集成测试入口（摄像头 + FSM + TCP）
+├── config_ipcam.py                  # 摄像头 URL 配置
+└── requirements.txt                 # Python 依赖
 ```
 
 ---
 
-## 四幕叙事流程
+## 快速开始
 
+### 1. 环境
+
+```bash
+conda create -n ohhh python=3.12
+conda activate ohhh
+pip install -r requirements.txt
+cd web/frontend && npm install
 ```
-开场 → 第一幕:择色 → 第二幕:筑景 → 第三幕:唤灵 → 第四幕:成色
+
+### 2. 启动（美术测试）
+
+```bash
+# 终端 1：Mock 后端
+python web/mock_backend.py
+
+# 终端 2：WebSocket 桥接
+python web/ws_server.py
+
+# 终端 3：前端
+cd web/frontend && npm run dev
 ```
 
-### 开场引入
-全黑缓缓亮起，湖大校门水墨剪影浮现。泛黄邀请函飘落："岳麓千年，色隐其中。后来者，汝心何色？" AI 旁白欢迎玩家。
+浏览器打开：
 
-### 第一幕：择色
-系统主动提取用户底色：优先分析用户物件颜色，匹配失败则识别用户衣物颜色。
+| 幕 | 地址 |
+|---|------|
+| 第零幕 | `http://127.0.0.1:5173/test_act0.html` |
+| 第一幕 | `http://127.0.0.1:5173/test_act1.html` |
+| 第二幕 | `http://127.0.0.1:5173/test_act2.html` |
+| 第三幕 | `http://127.0.0.1:5173/test_act3.html` |
+| 第四幕 | `http://127.0.0.1:5173/test_act4.html` |
+| 第五幕 | `http://127.0.0.1:5173/test_act5.html` |
 
-| 颜色 | AI旁白 |
-|------|--------|
-| 岳麓绿 | "我看到了……你的颜色是岳麓的绿。这是生命的颜色，是根脉，是千年不息的传承。" |
-| 书院红 | "我看到了……你的颜色是书院的红。这是责任的颜色，是火焰，是代代相传的担当。" |
-| 西迁黄 | "我看到了……你的颜色是西迁的黄。这是坚韧的颜色，是大地，是风雨中的坚守。" |
-| 湘江蓝 | "我看到了……你的颜色是湘江的蓝。这是包容的颜色，是流水，是永不停息的追寻。" |
-| 校徽金 | "我看到了……你的颜色是校徽的金。这是荣耀的颜色，是星光，是照亮前路的理想。" |
-| 墨色 | "我看到了……你的颜色是墨色。这是求索的颜色，是书卷，是永不止步的真理。" |
+### 3. 启动（真实摄像头）
 
-### 第二幕：筑景
-系统直接读懂用户。用户食指绘画轨迹，握拳表示完成，系统直接说出识别结果。用户张开手则取消重画。
+```bash
+# 终端 1：集成后端（摄像头 + 手势 FSM）
+python test_integrated.py
 
-### 第三幕：唤灵
-系统自动匹配 Top-1 历史人物，姓名全程保密以吊用户胃口。后台并行启动 Wan 2.7 图生图。人物以剪影形式进行第一人称演绎，演艺结束画作成品同步完成。用户盖章带走。
+# 终端 2：WebSocket 桥接
+python web/ws_server.py
 
-### 第四幕：成色
-演艺结束，画作同步完成。人物剪影消散，明信片浮现。用户盖章确认，二维码弹出，扫码带走数字叙事卡+明信片。
+# 终端 3：前端
+cd web/frontend && npm run dev
+```
+
+浏览器打开 `http://127.0.0.1:5173`，切换 Live Mode。
+
+---
+
+## 五幕叙事
+
+| 幕 | 名称 | 用户动作 | 视觉 |
+|---|------|---------|------|
+| 0 | 开场 | 观看 | 静止底图 + 标题 + 飘动 icon + 光效 |
+| 1 | 入境 | 握拳 | 彩带呼吸 + 邀请文字 → 碎光散开白屏 |
+| 2 | 寻色 | 握拳触发颜色检测 | 液态 Chrome 颜色盘 + 外周旋转 + 动态文字 |
+| 3 | 筑景 | 食指绘画 + 握拳提交 | 颜色条 + 鼠标手绘 + 物象识别叠加 |
+| 4 | 唤灵 | 自动播放 | 八阶段叙事 → 人物框 + 颜色块漂浮 + 身份揭示 |
+| 5 | 成笺 | 自动播放 (27s) | 双色液态盘 + 人物盘 + AI 文案 + 二维码 |
 
 ---
 
 ## 手势交互
 
-### 择色手势（第一幕）
-
-| 手势 | 动作 | 效果 |
-|------|------|------|
-| 握拳 | 五指握起 | 确认当前颜色为底色 |
-| 五指张开 | 五指伸展 | 取消，重新提取 |
-
-### 全局手势（任意阶段）
-
-| 手势 | 动作 | 效果 |
-|------|------|------|
-| 握拳挥动 | 五指握拳 + 手部移动 | 颜色晕染扩散 |
-| 五指张开 | 五指伸展 | 停止晕染/取消 |
-
-### 绘画手势（第二幕）
-
-| 手势 | 动作 | 效果 |
-|------|------|------|
-| 食指伸出 | 仅食指伸展 | 进入绘画，指尖为笔 |
-| 握拳 | 五指握起 | 结束绘画，确认识别结果 |
-| 五指张开 | 五指伸展 | 取消重画 |
-
-### 确认手势（第四幕）
-
-| 手势 | 动作 | 效果 |
-|------|------|------|
-| 放置确认章 | 摄像头识别特殊标记 | 盖章确认，带走千年色 |
-
----
-
-## 技术模块详解
-
-### 颜色提取（物件主色 + 衣物颜色）
-
-系统主动提取用户底色：优先分析物件颜色，失败则识别衣物颜色。
-
-```
-摄像头帧
-    │
-    ├── 物件颜色提取：HSV主色分析 → 六色基调匹配
-    │                    （物件优先）
-    │
-    └── 衣物颜色提取：MediaPipe人体分割 → 躯干颜色统计 → 六色匹配
-                       （兜底方案）
-```
-
-**文件**：`vision/color_detector.py` / `vision/body_color_detector.py` 🔸未实现
-
-### 手势状态机（6 模式 FSM）
-
-| 模式 | 状态 | 说明 |
-|------|------|------|
-| COLOR_EXTRACTION | AWAITING_OBJECT → OBJECT_ANALYZING → CONFIRMED | 颜色提取 |
-| GLOBAL | IDLE | 全局空闲 |
-| DRAWING | TRACKING → COMPLETED/CANCELLED | 绘画模式 |
-| CANDIDATE | BROWSING → CONFIRMED/CANCELLED | 物象确认 |
-| CHAR_RECOMMEND | BROWSING → CONFIRMED/TO_WHEEL | 人物推荐 |
-| CHAR_WHEEL | SCROLLING → PREVIEWING → CONFIRMED | 人物轮盘 |
-
-**文件**：`vision/gesture_state_machine.py`
-
-### 草图识别（QuickDraw CNN）
-
-```
-食指指尖轨迹 → 28×28 灰度图 → CNN 推理 → 物象映射 → 颜色加权 → 直接识别结果
-```
-
-- 模型：QuickDraw MobileNet，82 类，ONNX 2.5MB
-- 准确率：83.8%
-- 88 物象知识库映射
-- 输出：直接识别最优结果，用户握拳确认 / 张开手取消
-
-**文件**：`vision/sketch_recognizer.py`
-
-### RAG 检索生成
-
-```
-用户选择 → 知识库检索 → LLM 生成 → 个性化叙事 + 图生图
-```
-
-- 知识库：208 实体 + 107 组合 + 100 模板
-- LLM：阿里云百炼（qwen-turbo 实时/qwen-plus 叙事）
-- 生图：Wan 2.7 image-pro（图生图融合）
-
-**文件**：`rag/generator.py`
-
-### 人物推荐
-
-四维打分排序：
-
-| 维度 | 权重 | 说明 |
-|------|------|------|
-| 内置参考表 | 0.50 | 颜色+物象→人物内置映射 |
-| 同组加权 | 0.20 | 已选人物的同组人物 |
-| 关键词匹配 | 0.25 | 文本相似度 |
-| 实体基础分 | 0.05 | 实体 popularity |
-
-**文件**：`rag/character_recommend.py`
-
-### Unity 通信
-
-- **:8888** 主通道：事件驱动（候选/确认/生成结果）
-- **:8889** 手部通道：~30fps 逐帧手部数据
-
-**文件**：`unity_bridge/server.py`
-
----
-
-## 训练教程
-
-### 🔸 颜色提取实现（待开发）
-
-颜色提取模块（物件颜色 + 衣物颜色）需要重新设计训练流程。
-
-**待实现功能**：
-1. 物件颜色提取：HSV 主色分析，匹配六色基调
-2. 衣物颜色提取：MediaPipe 人体分割 + 躯干颜色统计
-3. 六色匹配逻辑：岳麓绿 / 书院红 / 西迁黄 / 湘江蓝 / 校徽金 / 墨色
-
-**参考文件**：
-- `vision/color_detector.py`（物件颜色）
-- `vision/webcam_color_detector.py`（衣物颜色，支持simple/pose/selfie三种方法）
-
----
-
-## 常见问题
-
-### Q1: 颜色提取不准确 🔸未实现
-
-1. **物件颜色提取**：需调试 HSV 阈值参数
-2. **衣物颜色提取**：需测试 MediaPipe 人体分割效果
-3. **匹配逻辑**：确保六色基调阈值设置合理
-
-### Q2: 草图识别准确率低
-
-- 当前模型验证准确率 83.8%，属于正常范围
-- 可采集更多 QuickDraw 数据重新训练
-
-### Q3: Unity 连接失败
-
-1. 检查 `config_ipcam.py` 摄像头配置
-2. 检查防火墙是否允许 Python 端口
-3. 查看 `test_integrated.py` 输出日志
-
-### Q4: 图像生成失败
-
-1. 检查 `DASHSCOPE_API_KEY` 环境变量
-2. 查看 `rag/generator.py` 日志错误信息
-3. 网络问题可使用 mock 模式测试
-
----
-
-## 开发状态
-
-| 模块 | 状态 | 说明 |
-|------|------|------|
-| 手势识别（MediaPipe） | ✅ 完成 | 21 关键点追踪 |
-| 手势状态机（FSM） | 🔸 进行中 | 6 模式，新增 COLOR_EXTRACTION |
-| 颜色提取（物件+衣物） | 🔸 未实现 | 需开发 HSV 物件检测 + MediaPipe 人体分割 |
-| 草图识别（CNN） | ✅ 完成 | 准确率 83.8%，改为直接识别输出 |
-| 人物推荐（RAG） | ✅ 完成 | 四维打分 |
-| Python-Unity 通信 | ✅ 完成 | 双端口 TCP |
-| Unity 渲染 | 🔸 进行中 | Unity 端开发 |
-| 知识库 | ✅ 完成 | 208 实体 |
-| 图像生成 | ✅ 完成 | Wan 2.7 图生图 |
-
----
-
-## 贡献指南
-
-### Git 提交规范
-
-```
-[模块名] 具体做了什么
-
-例如：
-[vision] 实现 HSV 物件颜色检测 + MediaPipe 衣物颜色检测
-[rag] 完成 BM25 检索基础实现
-```
-
-### 分支管理
-
-| 分支 | 用途 |
+| 手势 | 作用 |
 |------|------|
-| main | 稳定版本 |
-| dev | 开发分支 |
-| feature/名字 | 个人开发 |
+| ✊ 握拳 | 确认 / 提交 / 重启择色 |
+| ☝️ 食指伸出 | 进入绘画 / 录制轨迹 |
+| 🖐️ 张手 | 取消 / 返回 |
+
+手势识别：MediaPipe 21 关键点 → FSM 6 模式状态机 → 1 帧防抖确认。
 
 ---
 
-## 致谢
+## 后端接入
 
-- **课程**：智能设计方法（Prompt Engineering / Role-Playing / Agent / Hallucination）
-- **数据集**：Google Quick, Draw!
-- **模型**：MediaPipe / QuickDraw CNN / 阿里云百炼
+各幕通过 props 接收后端数据，详见 `MIGRATION.md`。核心接口：
+
+- **第二幕**：`step` + `recognizedColors` + `copyByStep`
+- **第三幕**：`primaryColor` + `secondaryColor` + `onRecognizeSketch`
+- **第四幕**：`primaryColor` + `secondaryColor` + `onFetchSpiritMatch`
+- **第五幕**：`postcardData`（颜色、物象、人物、AI 文案、二维码）
 
 ---
 
-**湖南大学设计艺术学院 · 智能设计方法 · 哦齁齁齁组 · 2026**
+## 备份
+
+完整历史版本在 `backup/full-20260622` 分支。

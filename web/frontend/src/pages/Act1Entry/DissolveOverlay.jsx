@@ -26,8 +26,14 @@ export default function DissolveOverlay({ active, onDone }) {
   const onDoneRef = useRef(onDone);
   useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
 
+  // Use ref as started guard — NOT stage state — to avoid killing the timer
+  // on re-render. setStage("dissolving") triggers a re-render which would
+  // otherwise cause the effect cleanup to clearTimeout before it fires.
+  const startedRef = useRef(false);
+
   useEffect(() => {
-    if (active && stage === "idle") {
+    if (active && !startedRef.current) {
+      startedRef.current = true;
       setStage("dissolving");
       const maxDuration = 3.0 + 0.8 + 0.6; // longest particle + delay + white fade
       const timer = setTimeout(() => {
@@ -36,7 +42,7 @@ export default function DissolveOverlay({ active, onDone }) {
       }, maxDuration * 1000 + 200);
       return () => clearTimeout(timer);
     }
-  }, [active, stage]); // removed onDone from deps — use ref instead
+  }, [active]); // only active triggers this — startedRef guards against re-entry
 
   if (stage === "idle") return null;
   if (stage === "done") return <div className="dissolve-white" />;

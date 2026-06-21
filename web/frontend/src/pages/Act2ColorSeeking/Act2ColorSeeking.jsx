@@ -43,6 +43,7 @@ const DEFAULT_COPY = {
 };
 
 function hexToNorm(hex) {
+  if (!hex || typeof hex !== "string") return [0.5, 0.5, 0.5];
   const clean = hex.replace("#", "");
   return [
     parseInt(clean.slice(0, 2), 16) / 255,
@@ -83,7 +84,11 @@ export default function Act2ColorSeeking({
   const completeTimerRef = useRef(null);
   useEffect(() => {
     if (step === 4 && onComplete) {
-      completeTimerRef.current = setTimeout(() => onComplete(), completeDelay);
+      console.log("[Act2] step=4 reached, scheduling onComplete in", completeDelay, "ms");
+      completeTimerRef.current = setTimeout(() => {
+        console.log("[Act2] onComplete firing");
+        onComplete();
+      }, completeDelay);
     }
     return () => {
       if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
@@ -91,8 +96,15 @@ export default function Act2ColorSeeking({
   }, [step, onComplete, completeDelay]);
 
   const diskColors = useMemo(() => {
-    if (step === 3) return [recognizedColors[0]];
-    if (step === 4) return [recognizedColors[0], recognizedColors[1]];
+    if (step === 3) {
+      const c0 = recognizedColors[0];
+      return c0 ? [c0] : [];
+    }
+    if (step === 4) {
+      const c0 = recognizedColors[0] || "#F2C94C";
+      const c1 = recognizedColors[1] || c0; // fallback: duplicate first color
+      return [c0, c1];
+    }
     return [];
   }, [step, recognizedColors]);
 
@@ -109,7 +121,7 @@ export default function Act2ColorSeeking({
           {isColorActive && diskColors.length > 0 && (
             <LiquidChrome
               colorA={hexToNorm(diskColors[0])}
-              colorB={hexToNorm(diskColors.length >= 2 ? diskColors[1] : diskColors[0])}
+              colorB={hexToNorm(diskColors[1] || diskColors[0])}
               speed={0.25}
               amplitude={0.40}
               frequencyX={2.0}

@@ -75,6 +75,7 @@ async function mockRecognizeSketch() {
 }
 
 export default function Act3FormingVision({ primaryColor = "#F2E700", secondaryColor = "#355BFF", maxRounds = 2, onRecognizeSketch, onComplete, completeDelay = 2000, remotePoints = [] }) {
+  console.log("[Act3] Mounting with primaryColor:", primaryColor, "secondaryColor:", secondaryColor);
   const sceneRef = useRef(null), canvasRef = useRef(null);
   const [sceneSize, setSceneSize] = useState({ width: 1, height: 1 });
   const [round, setRound] = useState(1);
