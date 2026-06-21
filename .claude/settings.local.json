@@ -55,7 +55,8 @@
       "Bash(powershell -Command \"Stop-Process -Id 36148,36556,38584 -Force\")",
       "Bash(git rm *)",
       "Bash(git commit -m 'chore: 清理仓库 — 删除Unity/数据集/旧测试/提案，保留核心代码 *)",
-      "Bash(git commit -m 'docs: 更新 README + 新增交互设计/技术架构文档 *)"
+      "Bash(git commit -m 'docs: 更新 README + 新增交互设计/技术架构文档 *)",
+      "Bash(powershell -Command 'Get-NetTCPConnection -LocalPort 5173,8080,8888,8889 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }')"
     ]
   }
 }

@@ -129,10 +129,15 @@ export default function App() {
 
   const timersRef = useRef([]);
   const latestRef = useRef({ mode, color, objectResult, matchedCharacter });
+  const stageRef = useRef(currentStage);
+  const goToTransitionRef = useRef(null);
+  const showAct1TransitionRef = useRef(showAct1Transition);
 
   useEffect(() => {
     latestRef.current = { mode, color, objectResult, matchedCharacter };
   }, [mode, color, objectResult, matchedCharacter]);
+  useEffect(() => { stageRef.current = currentStage; }, [currentStage]);
+  useEffect(() => { showAct1TransitionRef.current = showAct1Transition; }, [showAct1Transition]);
 
   const clearTimers = useCallback(() => {
     timersRef.current.forEach(clearTimeout);
@@ -228,52 +233,69 @@ export default function App() {
     console.log("[App] 收到:", message.type, message);
     switch (message.type) {
       case MESSAGE_TYPES.COLOR_DETECTED:
+        // Color detection DRIVES stage transitions (Act2 step progression)
         applyColorResult(
           findColor(message.colorName),
           message.source,
           message.confidence,
         );
         break;
+
       case MESSAGE_TYPES.GESTURE_STATE:
+        console.log("[App] GESTURE_STATE — gesture:", message.gesture, "mode:", message.mode, "currentStage:", stageRef.current, "goToTransition ready:", !!goToTransitionRef.current);
         setGesture(message.gesture || message.mode);
+        // Live mode: fist gesture triggers flow start from intro screen
+        if (message.gesture === "fist" && stageRef.current === STAGES.INTRO) {
+          console.log("[App] FIST detected on INTRO — triggering goToTransition");
+          addLog("检测到握拳手势，开始入境");
+          goToTransitionRef.current?.();
+        } else if (message.gesture === "fist") {
+          console.log("[App] FIST detected but stage is", stageRef.current, "(not INTRO)");
+        }
         break;
+
       case MESSAGE_TYPES.DRAWING_POINT:
-        setCurrentStage(STAGES.DRAW);
+        // Accumulate points for Act3 to render; don't jump stage
         setPoints((current) => [...current, { x: message.x, y: message.y }]);
         break;
+
       case MESSAGE_TYPES.OBJECT_RECOGNIZED:
-        applyObjectResult(message);
+        // Store object result for Act3/4/5; don't jump stage
+        setObjectResult(message);
+        addLog(`筑景完成：线条被叙事化为${message.name}`);
         break;
+
       case MESSAGE_TYPES.CHARACTER_MATCHED:
       case MESSAGE_TYPES.CHARACTERS_RECOMMENDED:
+        // Store character for Act4/5; don't jump stage
         if (message.character) {
-          beginSpiritReveal(message.character);
+          setMatchedCharacter(message.character);
+          addLog(`人物匹配：${message.character.name}`);
         } else {
           addLog("人物消息中没有可用人物数据");
         }
         break;
+
       case MESSAGE_TYPES.NARRATIVE_GENERATED:
-        clearTimers();
+        // Store narrative for Act5; don't jump stage
         setNarrative(message);
-        setCurrentStage(STAGES.POSTCARD);
-        setIsAutoAdvancing(false);
-        addLog("收到 AI 叙事，进入第四幕：成色");
+        addLog("收到 AI 叙事");
         break;
+
       case MESSAGE_TYPES.POSTCARD_READY:
         addLog(`明信片已生成，扫码下载: ${message.imageUrl}`);
         break;
+
       case MESSAGE_TYPES.SYSTEM_LOG:
         addLog(`[后端 ${message.level}] ${message.message}`);
         break;
+
       default:
         break;
     }
   }, [
     addLog,
     applyColorResult,
-    applyObjectResult,
-    beginSpiritReveal,
-    clearTimers,
   ]);
 
   const socket = useWebSocket(WS_URL, handleBackendPayload);
@@ -331,6 +353,7 @@ export default function App() {
       goToColor();
     }
   }, [addLog, showAct1Transition, goToColor]);
+  useEffect(() => { goToTransitionRef.current = goToTransition; }, [goToTransition]);
 
   const goToDraw = useCallback(() => {
     console.log("[App] goToDraw - transitioning to Act3, color:", latestRef.current.color);
@@ -420,19 +443,31 @@ export default function App() {
         description: [result.reason],
       };
     }
-    // Live mode: the sketch data comes from the backend
-    if (objectResult) {
+    // Live mode: backend already sent object_recognized — use cached data
+    const cached = latestRef.current.objectResult;
+    if (cached) {
       return {
-        label: objectResult.name,
-        description: [objectResult.reason || "你画下了一个意象。"],
+        label: cached.name,
+        description: [cached.reason || `你画下了${cached.name}。`],
+      };
+    }
+    // Fallback: wait a moment and check again
+    await new Promise((r) => setTimeout(r, 1500));
+    const retry = latestRef.current.objectResult;
+    if (retry) {
+      return {
+        label: retry.name,
+        description: [retry.reason || `你画下了${retry.name}。`],
       };
     }
     return { label: "桥", description: ["你画下了一个意象。"] };
-  }, [mode, points, color, objectResult]);
+  }, [mode, points, color]);
 
   // ── Render ──
 
-  const isActPage = currentStage !== "intro_old"; // old intro is gone, all stages are act pages
+  // Show debug panel during act pages in live mode (for monitoring)
+  const isActPage = currentStage !== "intro_old";
+  const showDebugPanel = !isActPage || mode === "live";
 
   function renderCurrentStage() {
     switch (currentStage) {
@@ -440,7 +475,8 @@ export default function App() {
         return (
           <Act0
             onNext={goToTransition}
-            autoAdvanceDelay={mode === "demo" ? 5000 : 8000}
+            autoAdvanceDelay={5000}
+            waitForGesture={mode === "live"}
           />
         );
 
@@ -545,9 +581,9 @@ export default function App() {
       <main className={isActPage ? "" : "mx-auto max-w-[1280px] px-4 py-6 md:px-8"}>
         {renderCurrentStage()}
 
-        {/* Debug panel — hidden during act pages */}
-        {!isActPage && (
-          <details className="mx-auto mt-6 max-w-5xl rounded-xl border border-white/5 bg-black/10 text-sm text-white/45">
+        {/* Debug panel — visible during live mode for monitoring */}
+        {(mode === "live" || !isActPage) && (
+          <details className={mode === "live" && isActPage ? "fixed bottom-4 right-4 z-[100] max-w-sm rounded-xl border border-white/10 bg-black/85 text-sm text-white/60 backdrop-blur" : "mx-auto mt-6 max-w-5xl rounded-xl border border-white/5 bg-black/10 text-sm text-white/45"}>
             <summary className="cursor-pointer px-4 py-3 hover:text-white/65">查看系统状态与事件日志</summary>
             <div className="grid gap-5 border-t border-white/5 p-4 md:grid-cols-2">
               <div>

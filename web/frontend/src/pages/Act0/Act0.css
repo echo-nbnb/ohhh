@@ -79,6 +79,22 @@
   pointer-events: none;
 }
 
+/* Live 模式提示文字 */
+.act0__hint {
+  margin-top: 32px;
+  color: #8a8a7a;
+  font-family: "Source Han Serif CN", "Noto Serif SC", serif;
+  font-size: clamp(16px, 1.6vw, 24px);
+  letter-spacing: 0.12em;
+  animation: act0HintPulse 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes act0HintPulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.80; }
+}
+
 /* icon 飘动 */
 @keyframes act0IconFloat {
   0% {

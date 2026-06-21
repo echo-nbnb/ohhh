@@ -1,189 +1,150 @@
 # 前端对接技术文档
 
-## 1. 架构
+## 架构
 
 ```
-浏览器 (HTML/JS)
+浏览器 React (Vite :5173)
     │  WebSocket ws://127.0.0.1:8080
     ▼
-ws_server.py  (:8080)
-    │  TCP
+ws_server.py  (:8080)  ← WebSocket ↔ TCP 桥接
+    │  TCP (:8888 主通道, :8889 手部通道)
     ▼
-test_integrated.py  (:8888 主通道 / :8889 手部通道)
+test_integrated.py  (:8888/:8889)  ← 摄像头 + 手势 FSM + 颜色/物象/人物识别
     │
-    ├── vision/   MediaPipe 手部检测 + 手势状态机 + 颜色检测 + 草图识别
-    ├── rag/      知识检索 + 人物推荐 + 叙事生成 + 明信片合成
-    └── OSS       明信片上传 + 二维码生成
+    ├── vision/   MediaPipe 手部追踪 + 手势 FSM + HSV 颜色检测 + QuickDraw 草图识别
+    ├── rag/      知识检索 + 人物推荐 (35人) + LLM 叙事生成 + OSS 明信片上传
+    └── web/frontend/src/pages/  五幕 React 组件
 ```
 
-## 2. 启动顺序
+## 启动
 
 ```bash
-# 终端 1: 后端（无摄像头模式用于开发测试）
-python test_integrated.py --no-display --no-camera
+# 终端 1：后端
+python test_integrated.py
 
-# 终端 2: WebSocket 桥接
+# 终端 2：WebSocket 桥接
 python web/ws_server.py
 
-# 终端 3: 打开 web/index.html（直接双击或 Live Server）
+# 终端 3：前端
+cd web/frontend && npm run dev
+# → http://127.0.0.1:5173
 ```
 
-## 3. WebSocket 连接
+美术测试（不需要后端）：
 
-| 项 | 值 |
-|----|-----|
-| 地址 | `ws://127.0.0.1:8080` |
-| 格式 | JSON 文本 |
-| 编码 | UTF-8 |
+| 幕 | 地址 |
+|---|------|
+| 第零幕 | `http://127.0.0.1:5173/test_act0.html` |
+| 第一幕 | `http://127.0.0.1:5173/test_act1.html` |
+| 第二幕 | `http://127.0.0.1:5173/test_act2.html` |
+| 第三幕 | `http://127.0.0.1:5173/test_act3.html` |
+| 第四幕 | `http://127.0.0.1:5173/test_act4.html` |
+| 第五幕 | `http://127.0.0.1:5173/test_act5.html` |
 
----
+## WebSocket 消息协议
 
-## 4. 前端 → 后端（发送）
+所有消息 JSON + `\n` 分隔，UTF-8 编码。
 
-| type | 参数 | 说明 |
-|------|------|------|
-| `gesture_simulate` | `{"gesture": "fist"}` | 握拳 |
-| `gesture_simulate` | `{"gesture": "open_hand"}` | 张手 |
-| `gesture_simulate` | `{"gesture": "index_pointing"}` | 食指伸出 |
-| `generation_start` | `{}` | 显式请求生成 |
+### 前端 → 后端
 
-## 5. 后端 → 前端（接收）
+| type | 说明 |
+|------|------|
+| `gesture_simulate` | `{"gesture": "fist"\|"open_hand"\|"index_pointing"}` TCP 手势模拟 |
 
-### 5.1 连接
+### 后端 → 前端
 
-| type | 字段 | 说明 |
-|------|------|------|
-| `connected` | `message: "integrated_server_ready"` | 后端就绪 |
+#### 连接与状态
 
-### 5.2 状态同步
+| type | 关键字段 |
+|------|---------|
+| `connected` | `message: "integrated_server_ready"` |
+| `gesture_state` | `mode` + `sub_state` + `gesture` |
+| `hand_appeared` | `palm_center: [x, y]` |
+| `hand_tracking` | `landmarks` + `fingertips` + `palm_center` |
 
-| type | 字段 | 说明 |
-|------|------|------|
-| `gesture_state` | `mode` | FSM 当前模式: `COLOR_EXTRACTION` / `GLOBAL` / `DRAWING` / `CANDIDATE` / `CHAR_RECOMMEND` |
-| | `sub_state` | 子状态: `AWAITING_OBJECT` / `OBJECT_ANALYZING` / `OBJECT_CONFIRMING` / `TRACKING` / `BROWSING` / `IDLE` |
-| | `gesture` | 当前检测到的手势: `fist` / `open_hand` / `index_pointing` |
+#### 第一幕 · 择色
 
-### 5.3 第一段 · 寻色
+| type | 关键字段 |
+|------|---------|
+| `color_extraction_start` | `message` |
+| `object_color_detected` | `color` + `confidence` + `source: "object"` |
+| `object_color_failed` | `message` |
+| `clothing_color_detected` | `color` + `confidence` + `source: "clothing"` |
+| `clothing_color_failed` | `message` |
+| `color_confirmed` | `color` + `message` |
 
-| type | 字段 | 说明 |
-|------|------|------|
-| `color_extraction_start` | `message` | 引导文字 "请将随身之物靠近光中…" |
-| `object_color_detected` | `color` | 颜色名（岳麓绿/书院红/西迁黄/湘江蓝/校徽金/墨色） |
-| | `confidence` | 置信度 0~1 |
-| | `source` | `"object"` |
-| | `message` | 叙事文字 |
-| `object_color_failed` | `message` | 物件未匹配提示 |
-| `clothing_color_detected` | `color` | 衣物颜色名 |
-| | `confidence` | 置信度 |
-| | `source` | `"clothing"` |
-| | `message` | 叙事文字 |
-| `clothing_color_failed` | `message` | 衣物也未匹配提示 |
-| `color_confirmed` | `color` | 最终确认的颜色 |
-| | `source` | `"object"` / `"clothing"` / `"ink"` |
-| | `message` | 确认叙事文字 |
+#### 第二幕 · 筑景
 
-### 5.4 第二段 · 造象
+| type | 关键字段 |
+|------|---------|
+| `drawing_start` | `message` |
+| `drawing_point` | `x` + `y` （食指指尖） |
+| `object_recognized` | `object.name` + `object.score` + `object.qd_category` |
+| `drawing_cancelled` | `message` |
+| `object_confirmed` | `object` + `objects_so_far` + `can_continue` |
 
-| type | 字段 | 说明 |
-|------|------|------|
-| `hand_appeared` | `palm_center: [x, y]` | 手首次进入画面 |
-| `drawing_start` | `message` | "伸出食指，开始作画。" |
-| `object_recognized` | `color` | 当前颜色 |
-| | `object.name` | 识别物象名 |
-| | `object.score` | 置信度 |
-| | `object.qd_category` | QuickDraw 类别 |
-| `drawing_cancelled` | `message` | 取消提示 |
-| `object_confirmed` | `object` | 已确认的物象名 |
-| | `objects_so_far: [...]` | 累积物象列表 |
-| | `can_continue: true` | 是否可继续添加物象 |
-| | `message` | 叙事文字 |
+#### 第三幕 · 唤灵
 
-### 5.5 第三段 · 唤灵
+| type | 关键字段 |
+|------|---------|
+| `objects_summary` | `objects` + `message` |
+| `character_search_start` | `message` + `context` |
+| `character_found` | `message` |
+| `character_candidates` | `candidates: [{name, title, score, reason, monologue, spiritLine}]` |
+| `character_performance` | `paragraphs: string[]` |
+| `character_revealed` | `name` + `title` + `message` |
 
-| type | 字段 | 说明 |
-|------|------|------|
-| `character_search_start` | `message` | 因果解释文字 |
-| | `context.color` | 用户颜色 |
-| | `context.objects: [...]` | 用户物象列表 |
-| `character_found` | `message` | "找到了。" |
-| | `character_name_hidden: true` | 隐藏名字标志 |
-| `character_performance` | `character: "????"` | 隐藏身份时显示 ???? |
-| | `paragraphs: [...]` | 第一人称台词数组 |
-| `character_revealed` | `name` | 人物名 |
-| | `title` | 称号 |
-| | `era` | 时代 |
-| | `summary` | 简介 |
-| | `message` | 揭示叙事文字 |
+#### 第四幕 · 成笺
 
-### 5.6 第四段 · 成笺
+| type | 关键字段 |
+|------|---------|
+| `generation_result` | `title` + `paragraphs` + `context` |
+| `postcard_result` | `image_url` + `qr_base64` + `unique_id` |
 
-| type | 字段 | 说明 |
-|------|------|------|
-| `generation_result` | `title` | 叙事标题 |
-| | `paragraphs: [...]` | 叙事段落数组 |
-| | `context.color` | 用户颜色 |
-| | `context.objects: [...]` | 用户物象 |
-| | `context.character` | 选中人物 |
-| `postcard_result` | `image_url` | **公网下载链接** |
-| | `qr_base64` | **二维码 data URI** (`data:image/png;base64,...`) |
-| | `unique_id` | 唯一编号 |
-| | `message` | "扫码带走你的千年色。" |
+## 手势 → FSM 状态映射
 
----
+| FSM mode | sub_state | 手势 | 作用 |
+|----------|-----------|------|------|
+| `COLOR_EXTRACTION` | `AWAITING_OBJECT` | fist | 触发颜色分析 |
+| `COLOR_EXTRACTION` | `OBJECT_CONFIRMING` | fist | 确认颜色（已自动确认） |
+| `GLOBAL` | `IDLE` | index_pointing | 进入绘画 |
+| `GLOBAL` | `IDLE` | fist | 重启择色 |
+| `DRAWING` | `TRACKING` | index_pointing | 录制轨迹 |
+| `DRAWING` | `TRACKING` | fist | 提交绘画→识物→自动确认 |
+| `DRAWING` | `TRACKING` | open_hand | 取消绘画 |
+| `CANDIDATE` | `BROWSING` | fist | 确认物象 |
+| `CANDIDATE` | `BROWSING` | open_hand | 重画 |
 
-## 6. 交互流程（完整手势序列）
+## 前端适配器
 
-```
-用户进入    →  hand_appeared
+`src/services/backendAdapter.js` 负责后端消息 → 前端内部事件转换：
 
-握拳        →  color_extraction_start → object_color_detected
-（自动）     →  gesture_state: OBJECT_CONFIRMING
-握拳        →  color_confirmed → gesture_state: GLOBAL
+| 后端消息 | 前端事件 |
+|---------|---------|
+| `object_color_detected` / `clothing_color_detected` / `color_confirmed` | `color_detected` |
+| `object_recognized` | `object_recognized` |
+| `character_candidates` / `character_revealed` | `character_matched` |
+| `character_performance` → | `system_log` |
+| `generation_result` | `narrative_generated` |
+| `postcard_result` | `postcard_ready` |
+| `hand_tracking` / `drawing_point` | `drawing_point` |
 
-食指伸出    →  drawing_start → gesture_state: DRAWING
-（空中绘画）  →  指尖轨迹实时渲染
-握拳        →  object_recognized → gesture_state: CANDIDATE
-握拳        →  object_confirmed（可重复：食指再画 → 握拳提交 → 握拳确认）
+## 后端接入方式
 
-握拳完成筑景 →  objects_summary → character_search_start
-            →  character_found
-            →  character_performance（人物第一人称演绎）
-            →  character_revealed（揭示身份）
-            →  generation_result（自动触发）
-            →  postcard_result（OSS 上传 + 二维码）
+各幕组件通过 props 接收后端数据，不需要全局状态库：
 
-张手        →  drawing_cancelled（回到绘画 / 取消）
+```jsx
+// 第二幕
+<Act2ColorSeeking step={step} recognizedColors={colors} copyByStep={copy} />
+
+// 第三幕
+<Act3FormingVision primaryColor={c1} secondaryColor={c2} onRecognizeSketch={fn} />
+
+// 第四幕
+<Act4SpiritCalling primaryColor={c1} secondaryColor={c2} onFetchSpiritMatch={fn} />
+
+// 第五幕
+<Act5Postcard postcardData={data} />
 ```
 
----
-
-## 7. 手势状态 → UI 阶段映射
-
-| FSM mode | sub_state | 前端阶段 | 用户操作 |
-|----------|-----------|---------|---------|
-| `COLOR_EXTRACTION` | `AWAITING_OBJECT` | 寻色 · 等待 | 展示随身物品 |
-| `COLOR_EXTRACTION` | `OBJECT_ANALYZING` | 寻色 · 分析中 | 等待 |
-| `COLOR_EXTRACTION` | `OBJECT_CONFIRMING` | 寻色 · 确认 | 握拳确认 |
-| `COLOR_EXTRACTION` | `CLOTHING_FALLBACK` | 寻色 · 衣物兜底 | 等待 |
-| `GLOBAL` | `IDLE` | 自由态 | 食指绘画 / 握拳筑景 |
-| `DRAWING` | `TRACKING` | 造象 · 绘画中 | 空中绘画 |
-| `CANDIDATE` | `BROWSING` | 造象 · 确认物象 | 握拳确认 |
-| `CHAR_RECOMMEND` | `BROWSING` | 唤灵 · 寻找中 | 等待 |
-| `GLOBAL` | `IDLE` | 成笺 | 查看结果 / 扫码 |
-
----
-
-## 8. 必需的前端组件
-
-| 组件 | 触发消息 | 功能 |
-|------|---------|------|
-| 阶段指示器 | `gesture_state` | 显示当前在六段中哪一段 |
-| 颜色展示 | `object_color_detected` + `color_confirmed` | 色雾聚成色名 + 解读文字 |
-| 绘画画布 | `drawing_start` + `object_recognized` | 指尖轨迹实时渲染 |
-| 物象列表 | `object_confirmed` | 已确认物象展示 |
-| 人物剪影 | `character_found` | 模糊剪影 + 隐藏名字 |
-| 人物台词 | `character_performance` | 逐段显示第一人称台词 |
-| 人物揭示 | `character_revealed` | 姓名浮现动画 |
-| 叙事卡片 | `generation_result` | 叙事文本 + 作品展示 |
-| 二维码 | `postcard_result` | 二维码图片 + 下载引导 |
-| 手势提示 | 主动显示 | 当前可用的手势和操作提示 |
+完整接入示例见 `MIGRATION.md`。

@@ -44,19 +44,22 @@ function createLightLayers(count = 5) {
   }));
 }
 
-export default function Act0({ onNext, autoAdvanceDelay = 4000 }) {
+export default function Act0({ onNext, autoAdvanceDelay = 4000, waitForGesture = false }) {
   const floatingIcons = useMemo(() => createFloatingIcons(6), []);
   const lightLayers = useMemo(() => createLightLayers(6), []);
 
-  // Auto-advance after delay
+  // Auto-advance after delay (disabled when waiting for gesture)
   useEffect(() => {
-    if (!onNext) return;
+    if (!onNext || waitForGesture) return;
     const timer = setTimeout(() => onNext(), autoAdvanceDelay);
     return () => clearTimeout(timer);
-  }, [onNext, autoAdvanceDelay]);
+  }, [onNext, autoAdvanceDelay, waitForGesture]);
 
-  // Click on center area to skip
-  const handleClick = () => onNext?.();
+  // Click on center area to skip (disabled when waiting for gesture in live mode)
+  const handleClick = () => {
+    if (waitForGesture) return;
+    onNext?.();
+  };
 
   return (
     <section className="act0">
@@ -107,13 +110,16 @@ export default function Act0({ onNext, autoAdvanceDelay = 4000 }) {
       </div>
 
       {/* 中央标题 */}
-      <main className="act0__center" onClick={handleClick} style={{ cursor: onNext ? "pointer" : "default" }}>
+      <main className="act0__center" onClick={handleClick} style={{ cursor: waitForGesture ? "default" : (onNext ? "pointer" : "default") }}>
         <img
           className="act0__title"
           src={titleUrl}
-          alt="寻麓千年色 · 点击开始"
+          alt={waitForGesture ? "寻麓千年色 · 握拳开始" : "寻麓千年色 · 点击开始"}
           draggable="false"
         />
+        {waitForGesture && (
+          <p className="act0__hint">握拳开始</p>
+        )}
       </main>
     </section>
   );
