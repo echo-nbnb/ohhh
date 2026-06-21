@@ -2,9 +2,38 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ========== 自定义字体 ========== */
+
+/* Avango Display Serif — 展示标题用，加粗 */
+@font-face {
+  font-family: "Avango Display Serif";
+  src: url("/fonts/Avango-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Against — 英文副标题 / 装饰用，常规 */
+@font-face {
+  font-family: "Against";
+  src: url("/fonts/Against-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Source Han Serif CN — 中文正文，半粗 */
+@font-face {
+  font-family: "Source Han Serif CN";
+  src: url("/fonts/SourceHanSerifCN-SemiBold.otf") format("opentype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   color-scheme: dark;
-  font-family: "Noto Serif SC", "Songti SC", "Microsoft YaHei", sans-serif;
+  font-family: "Source Han Serif CN", "Noto Serif SC", "Songti SC", "Microsoft YaHei", sans-serif;
   background: #0d120e;
 }
 

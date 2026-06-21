@@ -33,6 +33,7 @@ class BackendConnection:
         self.port = port
         self.sock = None
         self.connected = False
+        self._recv_buf = ""  # 接收缓冲区，防止多消息合并时丢包
 
     def connect(self):
         try:
@@ -61,18 +62,27 @@ class BackendConnection:
             return False
 
     def receive(self, timeout=1.0):
-        """接收后端消息（非阻塞）"""
+        """接收后端消息（非阻塞），带缓冲防止多消息合并丢包"""
         if not self.connected:
             return None
         try:
+            # 先检查缓冲区是否有完整消息
+            if '\n' in self._recv_buf:
+                line, self._recv_buf = self._recv_buf.split('\n', 1)
+                if line.strip():
+                    return json.loads(line.strip())
+
             self.sock.settimeout(timeout)
             data = self.sock.recv(4096)
             if not data:
                 self.connected = False
                 return None
-            # 按行分割
-            lines = data.decode('utf-8').strip().split('\n')
-            for line in lines:
+
+            self._recv_buf += data.decode('utf-8')
+
+            # 从缓冲区取第一条完整消息
+            if '\n' in self._recv_buf:
+                line, self._recv_buf = self._recv_buf.split('\n', 1)
                 if line.strip():
                     return json.loads(line.strip())
         except socket.timeout:
@@ -100,20 +110,22 @@ class WSClient:
     async def send(self, data: dict):
         """发送到浏览器"""
         try:
+            msg_type = data.get("type", "?")
+            print(f"[WS→Browser] #{self.client_id} {msg_type}")
             await self.ws.send(json.dumps(data, ensure_ascii=False))
         except Exception as e:
             print(f"[WS→Browser] 发送失败: {e}")
 
     async def receive(self):
-        """从浏览器接收"""
+        """从浏览器接收，返回 None 表示超时，抛出异常表示连接关闭"""
         try:
             msg = await asyncio.wait_for(self.ws.recv(), timeout=0.1)
             return json.loads(msg)
         except asyncio.TimeoutError:
             return None
         except Exception as e:
-            print(f"[Browser→WS] 接收失败: {e}")
-            return None
+            # WebSocket 关闭，向上抛出让调用方处理
+            raise ConnectionError(f"WebSocket closed: {e}")
 
 
 class WebSocketServer:
@@ -147,7 +159,11 @@ class WebSocketServer:
         try:
             while self._running:
                 # 接收浏览器消息
-                msg = await client.receive()
+                try:
+                    msg = await client.receive()
+                except ConnectionError:
+                    print(f"[WS] 客户端 #{client_id} 断开连接")
+                    break
                 if msg:
                     print(f"[Browser→WS] #{client_id}: {msg.get('type', '?')}")
                     # 转发到后端
@@ -178,9 +194,12 @@ class WebSocketServer:
             client.backend_main.send(msg)
 
     async def _poll_backend(self, client: WSClient):
-        """轮询后端消息"""
+        """轮询后端消息，断线自动重连"""
         try:
-            # 主通道
+            # 主通道 — 断线自动重连
+            if not self.backend_main.connected:
+                print("[WS→TCP] 主通道断开，尝试重连...")
+                self.backend_main.connect()
             data = self.backend_main.receive(timeout=0.001)
             if data:
                 print(f"[TCP→WS] #{client.client_id}: {data.get('type', '?')}")

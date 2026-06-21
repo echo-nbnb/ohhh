@@ -1,0 +1,48 @@
+.act5{position:relative;width:100vw;height:100vh;overflow:hidden;background:#f8f8f4;user-select:none}
+.act5__bg{position:absolute;inset:0;z-index:1;width:100%;height:100%;object-fit:fill;pointer-events:none}
+.act5__pattern{position:absolute;inset:0;z-index:3;pointer-events:none;opacity:0;mix-blend-mode:multiply;animation:act5FadeIn 0.9s ease forwards}
+.act5__pattern--two{animation-delay:0.12s}
+.act5__colorRing{position:absolute;z-index:7;pointer-events:none;opacity:0;animation:act5FadeIn 0.8s ease forwards}
+.act5__colorRing--one{left:5.9%;top:6.8%;width:2.9vw;height:2.9vw}
+.act5__colorRing--two{left:10.3%;top:6.8%;width:2.9vw;height:2.9vw}
+.act5__titleBg{position:absolute;left:0;top:0;z-index:5;width:100%;height:35.4%;object-fit:fill;pointer-events:none;opacity:0;animation:act5FadeIn 1s ease forwards}
+.act5__postcardTitle{position:absolute;left:7.2%;top:12%;z-index:16;width:60vw;pointer-events:none;opacity:0;animation:act5TitleIn 0.9s cubic-bezier(0.18,0.86,0.35,1) forwards}
+.act5__postcardTitleCn{color:#3f3f3f;font-family:"Source Han Serif CN","Noto Serif SC","Songti SC",serif;font-size:clamp(48px,6vw,104px);line-height:0.95;letter-spacing:0.045em;white-space:nowrap;text-shadow:0 2px 8px rgba(255,255,255,0.72)}
+.act5__postcardTitleEn{margin-top:2.1%;margin-left:0.4%;color:#161616;font-family:Georgia,"Times New Roman",serif;font-size:clamp(14px,1.35vw,25px);line-height:1.15;letter-spacing:0.015em;font-weight:700;text-align:left}
+.act5__traceText{position:absolute;left:44%;top:28.3%;z-index:17;color:#1d1d1d;font-family:"Source Han Serif CN","Noto Serif SC",serif;font-size:clamp(13px,1.25vw,20px);letter-spacing:0.06em;white-space:nowrap;pointer-events:none;opacity:0;animation:act5FadeIn 0.8s ease forwards}
+.act5__imagery{position:absolute;z-index:9;pointer-events:none;opacity:0;mix-blend-mode:multiply;filter:drop-shadow(0 8px 18px rgba(0,0,0,0.06));animation:act5ObjectIn 0.95s ease forwards}
+.act5__imagery--bridge{left:11.8%;top:59.5%;width:34.5%}
+.act5__imagery--tree{right:7.2%;top:22.5%;width:25.5%}
+.act5__colorDiskWrap{position:absolute;left:71.4%;top:84.2%;z-index:13;width:17.2vw;aspect-ratio:1;transform:translate(-50%,-50%);pointer-events:none;opacity:0;animation:act5DiskIn 0.9s ease forwards}
+.act5__liquidDisk{position:absolute;inset:18.5%;z-index:1;overflow:hidden;border-radius:50%;background:#fff}
+.act5__colorDiskFrame{position:absolute;inset:12%;z-index:2;width:76%;height:76%;object-fit:contain}
+.act5__colorDiskOrbit{position:absolute;inset:0;z-index:3;width:100%;height:100%;object-fit:contain;transform-origin:50% 50%;animation:act5Orbit 32s linear infinite}
+.act5__personDiskWrap{position:absolute;right:-12%;top:38%;z-index:12;width:42vw;aspect-ratio:1;pointer-events:none;opacity:0;animation:act5DiskInNoTranslate 0.95s ease 0.1s forwards}
+.act5__personInner{position:absolute;inset:16%;z-index:1;border-radius:50%;overflow:hidden;display:flex;align-items:flex-end;justify-content:center}
+.act5__personPortrait{width:62%;height:auto;object-fit:contain}
+.act5__personDisk{position:absolute;inset:0;z-index:2;width:100%;height:100%;object-fit:contain}
+.act5__centerCopy{position:absolute;left:50%;top:52%;z-index:20;width:min(56vw,860px);transform:translate(-50%,-50%);color:#333;font-family:"Source Han Serif CN","Noto Serif SC","Songti SC",serif;font-size:clamp(25px,3vw,48px);line-height:1.55;letter-spacing:0.04em;text-align:center;pointer-events:none;text-shadow:0 2px 14px rgba(255,255,255,0.86)}
+.act5__centerLine{opacity:0;transform:translateY(12px);filter:blur(6px);animation:act5TextIn 0.85s cubic-bezier(0.18,0.86,0.35,1) forwards}
+.act5__centerLine:nth-child(2){animation-delay:0.08s}
+.act5__objectText{position:absolute;left:23%;bottom:3.7%;z-index:18;width:42vw;color:rgba(70,70,70,0.62);font-family:"Source Han Serif CN","Noto Serif SC",serif;font-size:clamp(16px,1.55vw,28px);line-height:1.5;letter-spacing:0.05em;pointer-events:none;opacity:0;animation:act5FadeUp 0.9s ease forwards}
+.act5__aiWriting{position:absolute;left:6.5%;top:36.7%;z-index:19;width:20.5vw;color:#111;font-family:"Source Han Serif CN","Noto Serif SC","Songti SC",serif;font-size:clamp(13px,1.18vw,21px);line-height:1.48;letter-spacing:0.03em;text-align:center;pointer-events:none;opacity:0;animation:act5FadeUp 0.9s ease forwards}
+.act5__dateText{position:absolute;left:50%;top:71.7%;transform:translateX(-50%);z-index:22;color:#555;font-family:Georgia,"Times New Roman",serif;font-size:clamp(22px,2.2vw,38px);line-height:1.38;letter-spacing:0.04em;text-align:center;white-space:pre-line;pointer-events:none;opacity:0;animation:act5FadeIn 0.8s ease forwards}
+.act5__mainTitle{position:absolute;left:50%;top:50.5%;z-index:26;width:26vw;height:auto;transform:translate(-50%,-50%);pointer-events:none;opacity:0;animation:act5FinalTitleIn 1s cubic-bezier(0.18,0.86,0.35,1) forwards}
+.act5__qrArea{position:absolute;right:5%;top:12%;z-index:28;width:6.2vw;aspect-ratio:1;pointer-events:none;opacity:0;animation:act5FadeIn 0.8s ease 0.2s forwards}
+.act5__qrImage{width:100%;height:100%;object-fit:contain;background:#fff}
+.act5__qrPlaceholder{width:100%;height:100%;background:linear-gradient(90deg,#111 10%,transparent 10% 20%,#111 20% 30%,transparent 30% 40%,#111 40% 50%,transparent 50% 60%,#111 60% 70%,transparent 70% 80%,#111 80% 90%,transparent 90%),linear-gradient(#111 10%,transparent 10% 20%,#111 20% 30%,transparent 30% 40%,#111 40% 50%,transparent 50% 60%,#111 60% 70%,transparent 70% 80%,#111 80% 90%,transparent 90%),#fff;background-size:18px 18px;border:4px solid #fff;box-sizing:border-box;display:flex;align-items:center;justify-content:center}
+.act5__qrPlaceholder span{display:none}
+.act5__restartBtn{position:absolute;left:50%;bottom:6%;z-index:40;transform:translateX(-50%);padding:12px 36px;border:1px solid rgba(0,0,0,0.12);border-radius:999px;background:rgba(255,255,255,0.85);color:#333;font-family:"Source Han Serif CN","Noto Serif SC",serif;font-size:15px;letter-spacing:0.08em;cursor:pointer;backdrop-filter:blur(8px);transition:all 0.3s ease;opacity:0;animation:act5FadeIn 0.8s ease 0.4s forwards}
+.act5__restartBtn:hover{background:rgba(0,0,0,0.06);border-color:rgba(0,0,0,0.25)}
+.act5__icons{position:absolute;inset:0;pointer-events:none;z-index:30}
+.act5__icon{position:absolute;object-fit:contain;animation:act5IconFloat var(--duration) ease-in-out infinite alternate;animation-delay:var(--delay);will-change:transform,opacity}
+@keyframes act5FadeIn{from{opacity:0;filter:blur(6px)}to{opacity:1;filter:blur(0)}}
+@keyframes act5FadeUp{from{opacity:0;transform:translateY(14px);filter:blur(6px)}to{opacity:1;transform:translateY(0);filter:blur(0)}}
+@keyframes act5TextIn{to{opacity:1;transform:translateY(0);filter:blur(0)}}
+@keyframes act5ObjectIn{from{opacity:0;transform:translateY(18px) scale(0.96);filter:blur(8px)}to{opacity:1;transform:translateY(0) scale(1);filter:blur(0)}}
+@keyframes act5DiskIn{from{opacity:0;transform:translate(-50%,-44%) scale(0.94);filter:blur(8px)}to{opacity:1;transform:translate(-50%,-50%) scale(1);filter:blur(0)}}
+@keyframes act5DiskInNoTranslate{from{opacity:0;transform:translateY(16px) scale(0.94);filter:blur(8px)}to{opacity:1;transform:translateY(0) scale(1);filter:blur(0)}}
+@keyframes act5TitleIn{from{opacity:0;transform:translateY(18px);filter:blur(8px)}to{opacity:1;transform:translateY(0);filter:blur(0)}}
+@keyframes act5FinalTitleIn{from{opacity:0;transform:translate(-50%,-45%) scale(0.94);filter:blur(10px)}to{opacity:1;transform:translate(-50%,-50%) scale(1);filter:blur(0)}}
+@keyframes act5Orbit{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes act5IconFloat{0%{transform:translate3d(0,0,0) rotate(0deg) scale(0.85);opacity:0.5}30%{opacity:0.85}70%{opacity:0.55}100%{transform:translate3d(var(--drift-x),var(--drift-y),0) rotate(65deg) scale(1.15);opacity:0.4}}

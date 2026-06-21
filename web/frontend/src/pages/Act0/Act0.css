@@ -1,0 +1,141 @@
+.act0 {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #f6f6f4;
+  user-select: none;
+}
+
+/* 静止底图 */
+.act0__bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 光效容器 */
+.act0__lights {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  overflow: hidden;
+}
+
+/* 背景光效：铺满画面，仅透明度渐变 */
+.act0__light {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  mix-blend-mode: screen;
+  animation: act0LightFloat var(--duration) ease-in-out infinite alternate;
+  animation-delay: var(--delay);
+  will-change: opacity;
+  pointer-events: none;
+}
+
+/* 四周 icon 容器 */
+.act0__icons {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* 飘动 icon */
+.act0__icon {
+  position: absolute;
+  object-fit: contain;
+  animation: act0IconFloat var(--duration) ease-in-out infinite alternate;
+  animation-delay: var(--delay);
+  will-change: transform, opacity;
+}
+
+/* 中央标题区 */
+.act0__center {
+  position: relative;
+  z-index: 5;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 大标题 */
+.act0__title {
+  width: min(66vw, 880px);
+  max-width: 88vw;
+  height: auto;
+  animation: act0TitleIn 1.2s cubic-bezier(0.18, 0.86, 0.35, 1) both;
+  pointer-events: none;
+}
+
+/* icon 飘动 */
+@keyframes act0IconFloat {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(0.85);
+    opacity: 0.5;
+  }
+  30% {
+    opacity: 0.85;
+  }
+  70% {
+    opacity: 0.55;
+  }
+  100% {
+    transform:
+      translate3d(var(--drift-x), var(--drift-y), 0)
+      rotate(65deg)
+      scale(1.15);
+    opacity: 0.4;
+  }
+}
+
+/* 光效透明渐变 — 缓慢大幅度呼吸 */
+@keyframes act0LightFloat {
+  0% {
+    opacity: 0.08;
+  }
+  40% {
+    opacity: 0.80;
+  }
+  70% {
+    opacity: 0.12;
+  }
+  100% {
+    opacity: 0.70;
+  }
+}
+
+/* 标题入场 */
+@keyframes act0TitleIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .act0__title {
+    width: 86vw;
+  }
+  .act0__icon {
+    opacity: 0.28;
+  }
+}

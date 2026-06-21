@@ -1,0 +1,33 @@
+.act4{position:relative;width:100vw;height:100vh;overflow:hidden;background:#f6f6f3;user-select:none}
+.act4__bg{position:absolute;inset:0;z-index:1;width:100%;height:100%;object-fit:fill;pointer-events:none}
+.act4__title{position:absolute;z-index:30;pointer-events:none;mix-blend-mode:multiply}
+.act4__title--top{left:0;top:0;width:76%;height:auto}
+.act4__title--bottom{left:0;bottom:0;width:54%;height:auto;transform:translateY(30%)}
+.act4__bar{position:absolute;z-index:4;pointer-events:none}
+.act4__bar--top{left:0;top:0;width:52%;height:8.3%}
+.act4__bar--bottom{right:0;bottom:0;width:70%;height:5.2%}
+.act4__centerStage{position:absolute;left:50%;top:52%;width:min(33vw,470px);aspect-ratio:1/1;transform:translate(-50%,-50%);z-index:10;pointer-events:none}
+.act4__personFrame{position:absolute;inset:0;width:100%;height:100%;opacity:0;animation:act4FadeIn 0.8s ease forwards}
+.act4__personPortrait{position:absolute;left:50%;bottom:5%;width:78%;height:auto;transform:translateX(-50%);opacity:0;animation:act4PortraitIn 1s cubic-bezier(0.18,0.86,0.35,1) forwards;filter:drop-shadow(0 8px 16px rgba(0,0,0,0.08))}
+.act4__blocks{position:absolute;width:46%;height:46%;opacity:0;animation:act4FadeIn 0.8s ease forwards,act4Float 4.8s ease-in-out infinite alternate}
+.act4__blocks--primary{left:6%;top:28%;z-index:13;animation-delay:0.15s,0s}
+.act4__blocks--secondary{right:5%;bottom:10%;z-index:13;animation-delay:0.3s,0.4s}
+.act4__centerCopy{position:absolute;left:50%;top:45%;width:min(38vw,520px);transform:translate(-50%,-50%);z-index:15;color:#565656;font-family:"Source Han Serif CN","Noto Serif SC","Songti SC",serif;font-size:clamp(20px,2.15vw,34px);line-height:1.7;letter-spacing:0.04em;text-align:center;text-shadow:0 2px 14px rgba(255,255,255,0.86);pointer-events:none}
+.act4__centerLine{opacity:0;transform:translateY(10px);filter:blur(5px);animation:act4TextIn 0.8s cubic-bezier(0.18,0.86,0.35,1) forwards}
+.act4__centerLine:nth-child(2){animation-delay:0.08s}
+.act4__centerLine:nth-child(3){animation-delay:0.16s}
+.act4__sideCopy{position:absolute;z-index:16;color:#575757;font-family:"Source Han Serif CN","Noto Serif SC","Songti SC",serif;line-height:1.72;letter-spacing:0.04em;text-shadow:0 2px 14px rgba(255,255,255,0.9);pointer-events:none}
+.act4__sideCopy--left{left:9.5%;top:53%;width:min(18vw,250px);transform:translateY(-50%);text-align:left;font-size:clamp(14px,1.5vw,24px)}
+.act4__sideCopy--right{right:8.5%;top:54%;width:min(20vw,290px);transform:translateY(-50%);text-align:right;font-size:clamp(14px,1.55vw,24px)}
+.act4__sideCopy.is-final.act4__sideCopy--left{left:10%;top:71%;width:min(22vw,320px);font-size:clamp(24px,2.6vw,42px);font-weight:700;line-height:1.4}
+.act4__sideCopy.is-final.act4__sideCopy--right{right:8.7%;top:54%;width:min(22vw,300px);font-size:clamp(15px,1.65vw,28px);line-height:1.8}
+.act4__sideLine{opacity:0;transform:translateY(8px);filter:blur(5px);animation:act4TextIn 0.75s cubic-bezier(0.18,0.86,0.35,1) forwards}
+.act4__sideLine:nth-child(2){animation-delay:0.05s}.act4__sideLine:nth-child(3){animation-delay:0.1s}.act4__sideLine:nth-child(4){animation-delay:0.15s}.act4__sideLine:nth-child(5){animation-delay:0.2s}.act4__sideLine:nth-child(6){animation-delay:0.25s}.act4__sideLine:nth-child(7){animation-delay:0.3s}.act4__sideLine:nth-child(8){animation-delay:0.35s}.act4__sideLine:nth-child(9){animation-delay:0.4s}
+.act4__icons{position:absolute;inset:0;pointer-events:none;z-index:17}
+.act4__icon{position:absolute;object-fit:contain;animation:act4IconFloat var(--duration) ease-in-out infinite alternate;animation-delay:var(--delay);will-change:transform,opacity}
+@keyframes act4TextIn{to{opacity:1;transform:translateY(0);filter:blur(0)}}
+@keyframes act4FadeIn{from{opacity:0;filter:blur(6px)}to{opacity:1;filter:blur(0)}}
+@keyframes act4PortraitIn{from{opacity:0;transform:translateX(-50%) translateY(18px) scale(0.96);filter:blur(10px)}to{opacity:1;transform:translateX(-50%) translateY(0) scale(1);filter:blur(0)}}
+@keyframes act4Float{from{transform:translateY(0)}to{transform:translateY(-10px)}}
+@keyframes act4IconFloat{0%{transform:translate3d(0,0,0) rotate(0deg) scale(0.85);opacity:0.5}30%{opacity:0.85}70%{opacity:0.55}100%{transform:translate3d(var(--drift-x),var(--drift-y),0) rotate(65deg) scale(1.15);opacity:0.4}}
+@media(max-width:768px){.act4__title--top{width:92%}.act4__title--bottom{width:74%}.act4__centerStage{width:66vw;top:49%}.act4__centerCopy{width:74vw;font-size:20px}.act4__sideCopy--left,.act4__sideCopy--right,.act4__sideCopy.is-final.act4__sideCopy--left,.act4__sideCopy.is-final.act4__sideCopy--right{left:50%;right:auto;width:76vw;transform:translate(-50%,0);text-align:center}.act4__sideCopy--left{top:74%}.act4__sideCopy--right{top:18%}.act4__sideCopy.is-final.act4__sideCopy--left{top:78%;font-size:22px;font-weight:700}.act4__sideCopy.is-final.act4__sideCopy--right{top:18%;font-size:16px}}

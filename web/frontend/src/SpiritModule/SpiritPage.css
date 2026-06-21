@@ -1,0 +1,214 @@
+.spirit-module-viewport {
+  position: relative;
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #f4f4f0;
+  line-height: 1.4;
+  box-sizing: border-box;
+}
+
+.spirit-module-stage-shell {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+}
+
+.spirit-module-stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  transform-origin: top left;
+  background: #f7f7f4;
+  color: #202020;
+  font-family: Georgia, "Times New Roman", "Songti SC", SimSun, serif;
+}
+
+.spirit-module-frame {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 1920px;
+  height: 1080px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.spirit-module-interaction-layer {
+  position: absolute;
+  inset: 0;
+  width: 1920px;
+  height: 1080px;
+  pointer-events: none;
+}
+
+.spirit-module-interaction-layer button {
+  pointer-events: auto;
+}
+
+.spirit-module-character-region {
+  overflow: hidden;
+}
+
+.spirit-module-character {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+  transform-origin: center bottom;
+  transition:
+    filter var(--spirit-module-reveal-duration, 2200ms) cubic-bezier(0.22, 0.76, 0.24, 1),
+    opacity var(--spirit-module-reveal-duration, 2200ms) ease,
+    transform var(--spirit-module-reveal-duration, 2200ms) cubic-bezier(0.22, 0.76, 0.24, 1);
+}
+
+.spirit-module-character--hidden {
+  filter: grayscale(1) blur(20px) contrast(0.55);
+  opacity: 0.22;
+  transform: scale(0.98);
+}
+
+.spirit-module-character--clear {
+  filter: grayscale(0) blur(0) contrast(1);
+  opacity: 1;
+  transform: scale(1);
+}
+
+.spirit-module-monologue {
+  font-size: 31px;
+  font-weight: 700;
+  line-height: 1.48;
+  color: #303030;
+}
+
+.spirit-module-monologue-line {
+  margin: 0 0 10px;
+  animation: spirit-module-line-in 620ms ease-out both;
+}
+
+.spirit-module-identity {
+  width: 100%;
+  text-align: center;
+  color: #171717;
+}
+
+.spirit-module-name {
+  margin: 0;
+  font-size: 54px;
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+.spirit-module-title {
+  margin: 18px 0 0;
+  white-space: pre-line;
+  font-size: 38px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.spirit-module-unknown {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555;
+  font-size: 50px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.spirit-module-search-message,
+.spirit-module-spirit-lines {
+  color: #555;
+  text-align: right;
+  font-size: 46px;
+  font-weight: 700;
+  line-height: 1.48;
+}
+
+.spirit-module-search-message p,
+.spirit-module-spirit-lines p {
+  margin: 0 0 46px;
+}
+
+.spirit-module-spirit-lines p {
+  animation: spirit-module-line-in 680ms ease-out both;
+}
+
+.spirit-module-spirit-lines p:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.spirit-module-spirit-lines p:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+.spirit-module-spirit-lines p:nth-child(4) {
+  animation-delay: 360ms;
+}
+
+.spirit-module-start-button {
+  width: 100%;
+  height: 100%;
+  border: 3px solid #293cff;
+  background: #ffee00;
+  color: #171717;
+  box-shadow: 9px 9px 0 #293cff;
+  cursor: pointer;
+  font: 800 22px/1 Georgia, "Songti SC", SimSun, serif;
+  letter-spacing: 0.12em;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.spirit-module-start-button:hover {
+  transform: translate(-3px, -3px);
+  box-shadow: 12px 12px 0 #293cff;
+}
+
+.spirit-module-start-button:focus-visible {
+  outline: 5px solid #171717;
+  outline-offset: 5px;
+}
+
+.spirit-module-status {
+  color: #666;
+  text-align: right;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+@keyframes spirit-module-line-in {
+  from {
+    opacity: 0;
+    filter: blur(5px);
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spirit-module-character,
+  .spirit-module-monologue-line,
+  .spirit-module-spirit-lines p,
+  .spirit-module-start-button {
+    animation-duration: 1ms;
+    transition-duration: 1ms;
+  }
+}

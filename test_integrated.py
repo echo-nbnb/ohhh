@@ -37,6 +37,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Integrated")
 
+# ── 摄像头调试日志（写入文件，方便实时查看）──
+_debug_log = logging.getLogger("CameraDebug")
+_debug_log.setLevel(logging.DEBUG)
+_debug_fh = logging.FileHandler("camera_debug.log", encoding="utf-8", mode="w")
+_debug_fh.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(message)s", datefmt="%H:%M:%S"))
+_debug_log.addHandler(_debug_fh)
+_debug_log.propagate = False  # 不输出到控制台，避免刷屏
+_debug_log.info("=== Camera Debug Log Started ===")
+
 # ── 模拟手部关键点（无摄像头时使用）───────────────────────
 
 class FakeLandmark:
@@ -210,7 +219,7 @@ class IntegratedServer:
     def _init_gesture_fsm(self):
         print("[3] 初始化手势状态机...")
         from vision.gesture_state_machine import create_gesture_state_machine, GestureMode
-        self.fsm = create_gesture_state_machine(debounce_frames=3)
+        self.fsm = create_gesture_state_machine(debounce_frames=1)
 
         # 回调：模式切换 → 发送到 Unity
         self.fsm.on_mode_change = self._on_fsm_mode_change
@@ -336,6 +345,15 @@ class IntegratedServer:
                 client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 print(f"\n[Unity] 主通道已连接: {addr}")
                 self.main_client = client
+                # 新连接 → 重置状态
+                self.selected_objects.clear()
+                self.sketch_trajectories.clear()
+                self._pending_trajectory = []
+                self.fsm._recognized_object = None
+                if self.fsm:
+                    self.fsm.reset_to_global()
+                    self.fsm.trigger_color_extraction_start()
+                _debug_log.info("STATE_RESET | 新客户端连接，重置回 COLOR_EXTRACTION")
                 self._send_main({"type": "connected",
                                  "message": "integrated_server_ready"})
                 # 发送初始手势状态
@@ -447,6 +465,7 @@ class IntegratedServer:
 
     def _send_main(self, data: dict):
         msg_type = data.get("type", "?")
+        _debug_log.debug(f"SEND_MAIN | type={msg_type} | {json.dumps(data, ensure_ascii=False)[:200]}")
         if not self.main_client:
             print(f"  [SEND:DROP] {msg_type} — main_client 未连接")
             return
@@ -504,6 +523,7 @@ class IntegratedServer:
         return None
 
     def _on_fsm_mode_change(self, mode: str, sub_state: str, gesture: str):
+        _debug_log.info(f"FSM_MODE_CHANGE | mode={mode} sub={sub_state} gesture={gesture}")
         print(f"  [FSM] mode={mode} sub={sub_state} gesture={gesture}")
         if mode == "DRAWING" and sub_state == "TRACKING":
             self._send_main({
@@ -513,7 +533,7 @@ class IntegratedServer:
         self._send_gesture_state()
 
     def _on_drawing_commit(self, trajectory):
-        """第二幕新流程：直接识别最优结果，发送到 Unity"""
+        """第二幕：直接识别最优结果 → 自动确认 → 触发人物推荐"""
         print(f"  [FSM] 绘画提交! 轨迹点数={len(trajectory)}")
         # 保存轨迹，等待确认后存入 sketch_trajectories
         self._pending_trajectory = trajectory
@@ -535,11 +555,22 @@ class IntegratedServer:
                         "qd_category": qd_cat
                     }
                 })
-                print(f"  → 已识别物象: {name} ({score:.2f}) → Unity")
+                _debug_log.info(f"DRAWING_COMMIT | object={name} score={score:.2f} | AUTO_CONFIRM")
+                print(f"  → 已识别物象: {name} ({score:.2f}) → 自动确认 → 触发人物")
+                # 自动确认物象，直接进入人物推荐+生成
+                self._on_object_confirmed(name, score, qd_cat)
             else:
-                self.fsm._recognized_object = None
-                self._pending_trajectory = []
-                print("  → 未识别到物象")
+                # 识别结果为空 → 兜底随机物象
+                import random as _r
+                _fallback = [("古树", 0.35, "tree"), ("书卷", 0.30, "book"),
+                             ("石阶", 0.28, "stairs"), ("林荫道", 0.25, "tree")]
+                name, score, qd_cat = _r.choice(_fallback)
+                self.fsm._recognized_object = (name, score, qd_cat)
+                self._send_main({"type": "object_recognized", "color": self.current_color,
+                    "object": {"name": name, "score": round(score, 4), "qd_category": qd_cat}})
+                _debug_log.info(f"DRAWING_COMMIT | object={name} score={score:.2f} | FALLBACK")
+                print(f"  → 未识别到物象，兜底: {name}")
+                self._on_object_confirmed(name, score, qd_cat)
 
     def _on_drawing_cancel(self):
         print("  [FSM] 绘画取消")
@@ -672,6 +703,15 @@ class IntegratedServer:
                 except Exception as e:
                     print(f"  [Postcard] 上传失败: {e}")
 
+            # ── 流程完成，重置状态准备下一轮 ──
+            self.selected_objects.clear()
+            self.sketch_trajectories.clear()
+            self._pending_trajectory = []
+            self.fsm._recognized_object = None
+            self.fsm.reset_to_global()
+            self.fsm.trigger_color_extraction_start()
+            _debug_log.info("STATE_RESET | 一轮完整流程结束，重置回 COLOR_EXTRACTION")
+
     def _on_character_confirmed(self):
         print("  [FSM] 人物已确认!")
         self._send_main({
@@ -695,6 +735,7 @@ class IntegratedServer:
 
     def _on_object_color_detected(self):
         """物件颜色检测"""
+        _debug_log.info(f"COLOR_DETECT_CALLBACK | frame_ok={'YES' if self._current_frame is not None else 'NO'} | detector_ok={'YES' if self.object_color_detector is not None else 'NO'}")
         print("  [FSM] 触发物件颜色检测")
         if self.object_color_detector is None or self._current_frame is None:
             self._send_main({
@@ -708,6 +749,7 @@ class IntegratedServer:
             frame = self._current_frame
             region = self.object_color_detector.detect_dominant_region(frame)
             if region is None:
+                _debug_log.info(f"COLOR_RESULT | stage=dominant_region | result=NO_REGION")
                 print("  → 未检测到显著颜色区域")
                 self._send_main({
                     "type": "object_color_failed",
@@ -718,6 +760,7 @@ class IntegratedServer:
 
             result = self.object_color_detector.detect(frame, region)
             if result is None:
+                _debug_log.info(f"COLOR_RESULT | stage=color_match | result=NO_MATCH")
                 print("  → 物件颜色未匹配六色")
                 self._send_main({
                     "type": "object_color_failed",
@@ -726,9 +769,10 @@ class IntegratedServer:
                 self.fsm.trigger_object_color_detected(False)
                 return
 
-            # 匹配成功
+            # 匹配成功 → 自动确认，直接进入 GLOBAL
             self.current_color = result.color_name
-            print(f"  → 物件颜色: {result.color_name} (置信度: {result.confidence:.2f})")
+            _debug_log.info(f"COLOR_RESULT | stage=match | result=OK | color={result.color_name} | conf={result.confidence:.2f} | AUTO_CONFIRM")
+            print(f"  → 物件颜色: {result.color_name} (置信度: {result.confidence:.2f}) → 自动确认")
             self._send_main({
                 "type": "object_color_detected",
                 "color": result.color_name,
@@ -736,7 +780,8 @@ class IntegratedServer:
                 "source": "object",
                 "message": f"我捕捉到了一抹{result.color_name}。",
             })
-            self.fsm.trigger_object_color_detected(True)
+            # 直接确认，跳过二次握拳
+            self.fsm.trigger_color_confirmed()
         except Exception as e:
             print(f"  → 物件颜色检测异常: {e}")
             self._send_main({
@@ -747,13 +792,16 @@ class IntegratedServer:
 
     def _on_clothing_fallback(self):
         """衣物兜底"""
+        import random as _random
+        _fallback_colors = ["岳麓绿", "书院红", "西迁黄", "湘江蓝", "校徽金"]
         print("  [FSM] 触发衣物兜底")
         if self.webcam_color_detector is None:
-            print("  → WebcamColorDetector 未就绪，使用默认墨色")
-            self.current_color = "墨色"
+            pick = _random.choice(_fallback_colors)
+            print(f"  → WebcamColorDetector 未就绪，随机选择: {pick}")
+            self.current_color = pick
             self._send_main({
                 "type": "clothing_color_failed",
-                "message": "今天的你，颜色也不愿被命名。"
+                "message": f"今天的你，颜色也不愿被命名。那就让{pick}替你开始吧。"
             })
             self.fsm.trigger_clothing_color_detected(False)
             return
@@ -761,19 +809,21 @@ class IntegratedServer:
         try:
             webcam_frame = self.webcam_color_detector.read_frame()
             if webcam_frame is None:
-                print("  → 摄像头读取失败，使用默认墨色")
-                self.current_color = "墨色"
+                pick = _random.choice(_fallback_colors)
+                print(f"  → 摄像头读取失败，随机选择: {pick}")
+                self.current_color = pick
                 self._send_main({
                     "type": "clothing_color_failed",
-                    "message": "今天的你，颜色也不愿被命名。"
+                    "message": f"今天的你，颜色也不愿被命名。那就让{pick}替你开始吧。"
                 })
                 self.fsm.trigger_clothing_color_detected(False)
                 return
 
             color_name, confidence = self.webcam_color_detector.detect(webcam_frame)
             if color_name is None:
-                print("  → 衣物颜色未匹配六色，使用默认墨色")
-                self.current_color = "墨色"
+                pick = _random.choice(_fallback_colors)
+                print(f"  → 衣物颜色未匹配六色，随机选择: {pick}")
+                self.current_color = pick
                 self._send_main({
                     "type": "clothing_color_failed",
                     "message": "今天的你，颜色也不愿被命名。"
@@ -782,7 +832,8 @@ class IntegratedServer:
                 return
 
             self.current_color = color_name
-            print(f"  → 衣物颜色: {color_name} (置信度: {confidence:.2f})")
+            _debug_log.info(f"COLOR_RESULT | stage=clothing_match | result=OK | color={color_name} | conf={confidence:.2f} | AUTO_CONFIRM")
+            print(f"  → 衣物颜色: {color_name} (置信度: {confidence:.2f}) → 自动确认")
             self._send_main({
                 "type": "clothing_color_detected",
                 "color": color_name,
@@ -790,7 +841,8 @@ class IntegratedServer:
                 "source": "clothing",
                 "message": f"那我看看今天的你。你今天穿着{color_name}。也许这就是你此刻的底色。"
             })
-            self.fsm.trigger_clothing_color_detected(True)
+            # 直接确认，跳过二次握拳
+            self.fsm.trigger_color_confirmed()
         except Exception as e:
             print(f"  → 衣物颜色检测异常: {e}，使用默认墨色")
             self.current_color = "墨色"
@@ -803,6 +855,7 @@ class IntegratedServer:
     def _on_color_confirmed(self):
         """颜色确认"""
         color = self.current_color or "岳麓绿"
+        _debug_log.info(f"COLOR_CONFIRMED | color={color} | fsm_mode={self.fsm.mode.value}")
         print(f"  [FSM] 颜色已确认: {color}")
         self._send_main({
             "type": "color_confirmed",
@@ -816,6 +869,7 @@ class IntegratedServer:
     def _run_camera_loop(self):
         from vision.hand_tracker import HAND_CONNECTIONS
         ts = 0
+        _last_log_frame = 0  # 帧日志限频
 
         # 鼠标回调: 标定点选取
         def on_mouse(event, x, y, flags, param):
@@ -852,6 +906,22 @@ class IntegratedServer:
 
                 # → 手势状态机（使用归一化坐标）
                 self.fsm.process(hand_lm, ts)
+
+                # ── 帧级调试日志（每30帧写一次，避免刷盘）──
+                if self.frame_count - _last_log_frame >= 30:
+                    _last_log_frame = self.frame_count
+                    tips = hand_lm
+                    get_y = lambda idx: tips[idx].y if hasattr(tips[idx], 'y') else tips[idx][1]
+                    _debug_log.info(
+                        f"FRAME#{self.frame_count} | hand=YES | "
+                        f"FSM={self.fsm.mode.value}/{self.fsm.sub_state} | "
+                        f"gesture={self.fsm.current_gesture.value} | "
+                        f"tips_y=[{get_y(8):.3f},{get_y(12):.3f},{get_y(16):.3f},{get_y(20):.3f}] | "
+                        f"mcp_y=[{get_y(6):.3f},{get_y(10):.3f},{get_y(14):.3f},{get_y(18):.3f}] | "
+                        f"tray={len(self.fsm.trajectory)} | "
+                        f"color={self.current_color} | "
+                        f"unity={'OK' if self.main_client else '--'}"
+                    )
 
                 # → Unity 手部数据（从已检测结果直接计算像素坐标）
                 pixel_landmarks = [(int(lm.x * w), int(lm.y * h)) for lm in hand_lm]
@@ -921,6 +991,14 @@ class IntegratedServer:
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, u_color, 2)
             else:
                 self.fsm.process(None, ts)
+                # ── 无手部帧日志（每60帧一次）──
+                if self.frame_count - _last_log_frame >= 60:
+                    _last_log_frame = self.frame_count
+                    _debug_log.info(
+                        f"FRAME#{self.frame_count} | hand=NO | "
+                        f"FSM={self.fsm.mode.value}/{self.fsm.sub_state} | "
+                        f"waiting_for_main_client={'YES' if not self.main_client else 'no'}"
+                    )
                 # ── Cover Flow: 手消失在识别区 ──
                 if self._prev_hand_detected:
                     self._prev_hand_detected = False

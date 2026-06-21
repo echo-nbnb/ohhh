@@ -72,27 +72,33 @@ class CharacterRecommender:
             "红墙": ["张栻", "王夫之", "朱熹"],
             "钟楼": ["朱熹", "张栻"],
             "碑刻": ["王夫之", "曾国藩"],
+            "岳麓书院": ["张栻", "朱熹", "王夫之"],
         },
         "湘江蓝": {
             "桥梁": ["曾国藩", "左宗棠", "胡林翼"],
             "湖面": ["王夫之", "周敦颐"],
             "流水": ["魏源", "谭嗣同"],
             "湘江": ["曾国藩", "左宗棠", "毛泽东"],
+            "岳麓书院": ["周敦颐", "魏源", "王夫之"],
         },
         "岳麓绿": {
             "古树": ["王夫之", "胡安国", "胡宏"],
             "竹林": ["周敦颐", "程颢", "程颐"],
             "林荫道": ["朱熹", "张栻"],
+            "岳麓书院": ["胡宏", "朱熹", "张栻"],
         },
         "西迁黄": {
             "道路": ["胡庶华", "何长工", "成仿吾"],
             "石阶": ["何叔衡", "杨昌济"],
+            "岳麓书院": ["胡庶华", "毛泽东", "杨昌济"],
         },
         "墨色": {
             "书卷": ["李达", "杨昌济", "魏源"],
+            "岳麓书院": ["王夫之", "朱熹", "李达"],
         },
         "校徽金": {
             "图书馆": ["钱基博", "冯友兰"],
+            "岳麓书院": ["冯友兰", "钱基博", "李达"],
         },
     }
 
@@ -203,6 +209,36 @@ class CharacterRecommender:
                 pass  # 降级到启发式
 
         # 3. 降级: 直接返回启发式 top-k
+        # 当所有候选分数都很低（无参考表命中）时，从 top-15 中随机选取避免总是同一人
+        if scored and scored[0][1] < 0.15:
+            import random
+            pool = scored[:min(15, len(scored))]
+            # 按分数加权随机选 top_k 个不重复的
+            weights = [s[1] for s in pool]
+            total_w = sum(weights)
+            chosen = []
+            remaining = list(pool)
+            for _ in range(min(top_k, len(remaining))):
+                if not remaining:
+                    break
+                w = [s[1] for s in remaining]
+                tw = sum(w)
+                if tw <= 0:
+                    pick = random.choice(remaining)
+                else:
+                    # 加权随机
+                    r = random.random() * tw
+                    cumulative = 0
+                    pick = remaining[-1]
+                    for item in remaining:
+                        cumulative += item[1]
+                        if r <= cumulative:
+                            pick = item
+                            break
+                chosen.append(pick)
+                remaining.remove(pick)
+            return self._build_results(chosen)
+
         return self._build_results(scored[:top_k])
 
     # ------------------------------------------------------------------

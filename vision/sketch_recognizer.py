@@ -444,58 +444,69 @@ class HeuristicPredictor:
         dist_std = np.std(distances) / max(np.mean(distances), 1e-6)
 
         probs = {}
+        # 引入微量随机抖动，避免相同轨迹总是同一结果
+        import random
+        jitter = lambda: random.uniform(-0.03, 0.03)
 
         # 闭合 + 低距离方差 → 圆形
         if closedness > 0.6 and dist_std < 0.3:
-            probs["circle"] = 0.6
-            probs["face"] = 0.2
-            probs["sun"] = 0.15
+            probs["circle"] = 0.6 + jitter()
+            probs["face"] = 0.2 + jitter()
+            probs["sun"] = 0.15 + jitter()
+            probs["pond"] = 0.1 + jitter()
         # 低闭合 + 宽>高 → 横线/河流/桥梁
         elif aspect_ratio > 1.8 and direction_changes < 5:
-            probs["river"] = 0.4
-            probs["line"] = 0.3
-            probs["bridge"] = 0.2
-            probs["road"] = 0.1
+            probs["river"] = 0.4 + jitter()
+            probs["line"] = 0.3 + jitter()
+            probs["bridge"] = 0.2 + jitter()
+            probs["ocean"] = 0.1 + jitter()
         # 低闭合 + 高>宽 → 竖线/树/塔
         elif aspect_ratio < 0.5 and direction_changes < 5:
-            probs["tree"] = 0.35
-            probs["tower"] = 0.25
-            probs["line"] = 0.2
-            probs["pencil"] = 0.15
-        # 中等方向变化 + 非极端宽高比 → 房屋/建筑/书（放曲线分支前）
-        elif 3 <= direction_changes <= 8 and 0.5 <= aspect_ratio <= 2.0:
-            probs["house"] = 0.40
-            probs["square"] = 0.25
-            probs["book"] = 0.20
-            probs["castle"] = 0.15
+            probs["tree"] = 0.35 + jitter()
+            probs["tower"] = 0.25 + jitter()
+            probs["line"] = 0.2 + jitter()
+            probs["pencil"] = 0.15 + jitter()
         # 多方向变化 + 低闭合 → 锯齿/楼梯/山
         elif direction_changes >= 5 and closedness < 0.3:
-            probs["stairs"] = 0.35
-            probs["zigzag"] = 0.25
-            probs["mountain"] = 0.2
-            probs["triangle"] = 0.15
-        # 多方向变化 + 有闭合 → 房屋/复杂
+            probs["stairs"] = 0.35 + jitter()
+            probs["zigzag"] = 0.25 + jitter()
+            probs["mountain"] = 0.2 + jitter()
+            probs["triangle"] = 0.15 + jitter()
+        # 多方向变化 + 有闭合 → 房屋/城堡/书
         elif direction_changes >= 5 and closedness > 0.3:
-            probs["house"] = 0.35
-            probs["castle"] = 0.2
-            probs["book"] = 0.2
-            probs["square"] = 0.15
+            probs["house"] = 0.30 + jitter()
+            probs["castle"] = 0.25 + jitter()
+            probs["book"] = 0.20 + jitter()
+            probs["square"] = 0.15 + jitter()
+            probs["tree"] = 0.10 + jitter()
+        # 中等方向变化 + 非极端宽高比 → 多种可能
+        elif 3 <= direction_changes <= 8 and 0.5 <= aspect_ratio <= 2.0:
+            probs["house"] = 0.25 + jitter()
+            probs["tree"] = 0.18 + jitter()
+            probs["book"] = 0.18 + jitter()
+            probs["square"] = 0.14 + jitter()
+            probs["mountain"] = 0.10 + jitter()
+            probs["flower"] = 0.08 + jitter()
+            probs["castle"] = 0.07 + jitter()
         # 低方向变化 + 曲线 → 河流/云/山
         elif direction_changes >= 3:
-            probs["river"] = 0.3
-            probs["cloud"] = 0.25
-            probs["mountain"] = 0.25
-            probs["snake"] = 0.15
+            probs["river"] = 0.3 + jitter()
+            probs["cloud"] = 0.25 + jitter()
+            probs["mountain"] = 0.25 + jitter()
+            probs["snake"] = 0.15 + jitter()
         # 默认
         else:
-            probs["house"] = 0.25
-            probs["tree"] = 0.2
-            probs["book"] = 0.2
-            probs["line"] = 0.15
-            probs["circle"] = 0.1
-            probs["river"] = 0.1
+            probs["house"] = 0.18 + jitter()
+            probs["tree"] = 0.18 + jitter()
+            probs["book"] = 0.18 + jitter()
+            probs["line"] = 0.12 + jitter()
+            probs["circle"] = 0.12 + jitter()
+            probs["river"] = 0.10 + jitter()
+            probs["mountain"] = 0.07 + jitter()
+            probs["flower"] = 0.05 + jitter()
 
-        # 归一化
+        # 去掉负值，归一化
+        probs = {k: max(0.01, v) for k, v in probs.items()}
         total = sum(probs.values())
         return {k: v / total for k, v in probs.items()}
 

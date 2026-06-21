@@ -41,6 +41,7 @@ export const SUPPORTED_MESSAGE_TYPES = new Set([
   "generation_result",
   "postcard_result",
   // 直通类型
+  "connected",
   "gesture_state",
   "hand_tracking",
   "hand_appeared",

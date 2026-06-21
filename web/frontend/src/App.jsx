@@ -3,11 +3,6 @@ import Header from "./components/Header";
 import StageStepper from "./components/StageStepper";
 import StatusPanel from "./components/StatusPanel";
 import SystemLog from "./components/SystemLog";
-import IntroStage from "./components/stages/IntroStage";
-import ColorStage from "./components/stages/ColorStage";
-import DrawStage from "./components/stages/DrawStage";
-import SpiritStage from "./components/stages/SpiritStage";
-import PostcardStage from "./components/stages/PostcardStage";
 import { findColor } from "./data/colors";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { normalizeBackendMessage } from "./services/backendAdapter";
@@ -19,14 +14,106 @@ import {
 } from "./services/mockEngine";
 import { MESSAGE_TYPES } from "./services/messageTypes";
 
+// ── Act pages ──
+import Act0 from "./pages/Act0/Act0";
+import Act1Entry from "./pages/Act1Entry/Act1Entry";
+import Act2ColorSeeking from "./pages/Act2ColorSeeking/Act2ColorSeeking";
+import Act3FormingVision from "./pages/Act3FormingVision/Act3FormingVision";
+import Act4SpiritCalling from "./pages/Act4SpiritCalling/Act4SpiritCalling";
+import Act5Postcard from "./pages/Act5Postcard/Act5Postcard";
+
 const WS_URL = (() => {
   const { protocol, host } = window.location;
   return `${protocol === "https:" ? "wss" : "ws"}://${host}/ws`;
 })();
 
+// ── Stage constants ──
+const STAGES = {
+  INTRO: "intro",
+  TRANSITION: "transition",
+  COLOR: "color",
+  DRAW: "draw",
+  SPIRIT: "spirit",
+  POSTCARD: "postcard",
+};
+
+// ── Data bridging: App state → Act props ──
+
+function buildAct2CopyByStep(color) {
+  if (!color) {
+    return {
+      1: ["请将随身之物靠近光中。", "让它替你说话。"],
+      2: ["让我看看……", "这件东西里", "藏着怎样的颜色。"],
+      3: [],
+      4: [],
+    };
+  }
+  return {
+    1: ["请将随身之物靠近光中。", "让它替你说话。"],
+    2: ["让我看看……", "这件东西里", "藏着怎样的颜色。"],
+    3: [`一缕${color.name}浮出光面，`, `像旧纸上醒来的日色。`],
+    4: [`${color.name}与另一种颜色相遇，`, `像山门灯火照见夜色。`],
+  };
+}
+
+function buildAct4Payload(color, objectResult) {
+  return {
+    primaryColor: color?.hex || "#F2E700",
+    secondaryColor: color?.hex || "#355BFF",
+    firstColorName: color?.name || "黄",
+    secondColorName: color?.name || "蓝",
+    firstImageryName: objectResult?.name || "桥",
+    secondImageryName: objectResult?.name || "树",
+  };
+}
+
+function buildAct5Data(color, objectResult, matchedCharacter, narrative) {
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, "0")}.${String(now.getDate()).padStart(2, "0")}\n${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  return {
+    colors: {
+      primary: color?.hex || "#F2E700",
+      secondary: "#355BFF",
+      primaryName: color?.name || "明黄",
+      secondaryName: "澄蓝",
+    },
+    selectedPlaces: ["岳麓山", "湘江水", "书院檐角"],
+    title: {
+      cn: narrative?.title || `${color?.name || "千年色"} · ${objectResult?.name || "湖大"}之境`,
+      en: "THE MILLENNIUM COLOR OF YOURS",
+    },
+    traceText: `[${color?.name || "?"}] → [${objectResult?.name || "?"}] → [${matchedCharacter?.name || "?"}]`,
+    imageryItems: [
+      {
+        id: "object",
+        name: objectResult?.name || "桥",
+        imageUrl: "",
+        className: "act5__imagery--bridge",
+      },
+      {
+        id: "tree",
+        name: "树",
+        imageUrl: "",
+        className: "act5__imagery--tree",
+      },
+    ],
+    objectText: objectResult?.reason
+      ? [objectResult.reason]
+      : ["这个意象已经落下。"],
+    aiWriting: narrative?.paragraphs || ["你的千年色正在成形……"],
+    person: {
+      name: matchedCharacter?.name || "回应者",
+      portraitUrl: "",
+    },
+    mainTitleImageUrl: "",
+    downloadQrUrl: "",
+    createdAtText: dateStr,
+  };
+}
+
 export default function App() {
   const [mode, setMode] = useState("demo");
-  const [currentStage, setCurrentStage] = useState("intro");
+  const [currentStage, setCurrentStage] = useState(STAGES.INTRO);
   const [color, setColor] = useState(null);
   const [colorSource, setColorSource] = useState(null);
   const [gesture, setGesture] = useState(null);
@@ -37,6 +124,8 @@ export default function App() {
   const [narrative, setNarrative] = useState(null);
   const [logs, setLogs] = useState([]);
   const [isAutoAdvancing, setIsAutoAdvancing] = useState(false);
+  const [colorStep, setColorStep] = useState(1);
+  const [showAct1Transition, setShowAct1Transition] = useState(true);
 
   const timersRef = useRef([]);
   const latestRef = useRef({ mode, color, objectResult, matchedCharacter });
@@ -72,44 +161,11 @@ export default function App() {
     ]);
   }, []);
 
-  const beginSpiritReveal = useCallback((character = null) => {
-    clearTimers();
-    const latest = latestRef.current;
-    const resolvedCharacter = character
-      ?? (latest.mode === "demo" && latest.color && latest.objectResult
-        ? mockMatchCharacter(latest.color, latest.objectResult)
-        : latest.matchedCharacter);
-
-    setCurrentStage("spirit");
-    setMatchedCharacter(resolvedCharacter ?? null);
-    setSpiritStatus("searching");
-    setIsAutoAdvancing(false);
-    addLog("进入第三幕：正在千年文脉中寻找回应");
-
-    if (!resolvedCharacter) {
-      addLog("Live Mode 正在等待后端返回人物匹配结果");
-      return;
-    }
-
-    schedule(() => {
-      setSpiritStatus("found");
-      addLog("找到了回应者，姓名暂时隐藏");
-    }, 1200);
-
-    schedule(() => {
-      setSpiritStatus("speaking");
-      addLog("人物第一人称回声开始");
-    }, 2600);
-
-    schedule(() => {
-      setSpiritStatus("revealed");
-      addLog(`揭示人物：${resolvedCharacter.name}`);
-    }, 6500);
-  }, [addLog, clearTimers, schedule]);
+  // ── Apply callbacks (same for demo + live) ──
 
   const applyColorResult = useCallback((detectedColor, source, confidence = null) => {
     clearTimers();
-    setCurrentStage("color");
+    setCurrentStage(STAGES.COLOR);
     setColor(detectedColor);
     setColorSource(
       confidence === null
@@ -124,17 +180,23 @@ export default function App() {
     setIsAutoAdvancing(true);
     addLog(`择色完成：读取为${detectedColor.name}`);
 
+    // Drive Act2 step progression
+    setColorStep(2);
+    schedule(() => setColorStep(3), 1800);
+    schedule(() => setColorStep(4), 3600);
+
+    // After Act2 step 4, advance to draw
     schedule(() => {
-      setCurrentStage("draw");
+      setCurrentStage(STAGES.DRAW);
       setGesture((current) => latestRef.current.mode === "demo" ? "index_pointing" : current);
       setIsAutoAdvancing(false);
       addLog("自动进入第二幕：筑景");
-    }, 1500);
+    }, 6600);
   }, [addLog, clearTimers, schedule]);
 
   const applyObjectResult = useCallback((recognizedObject) => {
     clearTimers();
-    setCurrentStage("draw");
+    setCurrentStage(STAGES.DRAW);
     setObjectResult(recognizedObject);
     setGesture("drawing_complete");
     setIsAutoAdvancing(true);
@@ -143,16 +205,34 @@ export default function App() {
     schedule(() => {
       beginSpiritReveal();
     }, 1500);
-  }, [addLog, beginSpiritReveal, clearTimers, schedule]);
+  }, [addLog, clearTimers, schedule]);
+
+  // ── Spirit reveal (Act4 handles its own timeline; we just set stage + data) ──
+
+  const beginSpiritReveal = useCallback((character = null) => {
+    clearTimers();
+    const latest = latestRef.current;
+    const resolvedCharacter = character
+      ?? (latest.mode === "demo" && latest.color && latest.objectResult
+        ? mockMatchCharacter(latest.color, latest.objectResult)
+        : latest.matchedCharacter);
+
+    setCurrentStage(STAGES.SPIRIT);
+    setMatchedCharacter(resolvedCharacter ?? null);
+    setSpiritStatus("searching");
+    setIsAutoAdvancing(false);
+    addLog("进入第三幕：正在千年文脉中寻找回应");
+  }, [addLog, clearTimers]);
+
+  // ── WebSocket message handler ──
 
   const handleBackendPayload = useCallback((payload) => {
     const message = normalizeBackendMessage(payload);
-
     if (!message) {
-      addLog("忽略无法识别的后端消息");
+      console.log("[App] 无法识别:", payload?.type, payload);
       return;
     }
-
+    console.log("[App] 收到:", message.type, message);
     switch (message.type) {
       case MESSAGE_TYPES.COLOR_DETECTED:
         applyColorResult(
@@ -161,20 +241,16 @@ export default function App() {
           message.confidence,
         );
         break;
-
       case MESSAGE_TYPES.GESTURE_STATE:
         setGesture(message.gesture || message.mode);
         break;
-
       case MESSAGE_TYPES.DRAWING_POINT:
-        setCurrentStage("draw");
+        setCurrentStage(STAGES.DRAW);
         setPoints((current) => [...current, { x: message.x, y: message.y }]);
         break;
-
       case MESSAGE_TYPES.OBJECT_RECOGNIZED:
         applyObjectResult(message);
         break;
-
       case MESSAGE_TYPES.CHARACTER_MATCHED:
       case MESSAGE_TYPES.CHARACTERS_RECOMMENDED:
         if (message.character) {
@@ -183,23 +259,19 @@ export default function App() {
           addLog("人物消息中没有可用人物数据");
         }
         break;
-
       case MESSAGE_TYPES.NARRATIVE_GENERATED:
         clearTimers();
         setNarrative(message);
-        setCurrentStage("postcard");
+        setCurrentStage(STAGES.POSTCARD);
         setIsAutoAdvancing(false);
         addLog("收到 AI 叙事，进入第四幕：成色");
         break;
-
       case MESSAGE_TYPES.POSTCARD_READY:
         addLog(`明信片已生成，扫码下载: ${message.imageUrl}`);
         break;
-
       case MESSAGE_TYPES.SYSTEM_LOG:
         addLog(`[后端 ${message.level}] ${message.message}`);
         break;
-
       default:
         break;
     }
@@ -213,9 +285,11 @@ export default function App() {
 
   const socket = useWebSocket(WS_URL, handleBackendPayload);
 
+  // ── Reset ──
+
   const resetAll = useCallback(() => {
     clearTimers();
-    setCurrentStage("intro");
+    setCurrentStage(STAGES.INTRO);
     setColor(null);
     setColorSource(null);
     setGesture(null);
@@ -226,7 +300,10 @@ export default function App() {
     setNarrative(null);
     setLogs([]);
     setIsAutoAdvancing(false);
+    setColorStep(1);
   }, [clearTimers]);
+
+  // ── Mode switching ──
 
   const handleModeChange = (nextMode) => {
     if (nextMode === mode) return;
@@ -240,134 +317,260 @@ export default function App() {
     }]);
   };
 
-  const handleStartIntro = () => {
-    setCurrentStage("color");
-    addLog("开始寻色：进入第一幕");
-  };
+  // ── Stage transition handlers ──
 
-  const handleMockColorDetection = () => {
-    if (isAutoAdvancing) return;
-    const result = mockDetectColor();
-    applyColorResult(result.color, result.source, result.confidence);
-  };
-
-  const handleCompleteDrawing = () => {
-    if (isAutoAdvancing) return;
-    if (!color || points.length === 0) {
-      addLog("请先在画布上留下轨迹");
-      return;
+  const goToTransition = useCallback(() => {
+    if (showAct1Transition) {
+      setCurrentStage(STAGES.TRANSITION);
+      addLog("入境：一封来自千年前的邀请");
+    } else {
+      setCurrentStage(STAGES.COLOR);
+      addLog("跳过入境，直接进入寻色");
     }
-    applyObjectResult(mockRecognizeObject(points, color));
-  };
+  }, [addLog, showAct1Transition]);
 
-  const handleEnterPostcard = () => {
-    if (!matchedCharacter || spiritStatus !== "revealed") return;
-    clearTimers();
-    setNarrative(mockGenerateNarrative({ color, objectResult, matchedCharacter }));
-    setCurrentStage("postcard");
+  const goToColor = useCallback(() => {
+    setCurrentStage(STAGES.COLOR);
+    setColorStep(1);
+    addLog("入境完成，进入寻色");
+  }, [addLog]);
+
+  const goToDraw = useCallback(() => {
+    setCurrentStage(STAGES.DRAW);
     setIsAutoAdvancing(false);
-    addLog("生成 Mock 叙事并进入第四幕：成色");
-  };
+    addLog("择色完成，进入第二幕：筑景");
+  }, [addLog]);
+
+  const goToSpirit = useCallback(() => {
+    setCurrentStage(STAGES.SPIRIT);
+    setSpiritStatus("searching");
+    addLog("筑景完成，进入第三幕：唤灵");
+  }, [addLog]);
+
+  const goToPostcard = useCallback(() => {
+    if (mode === "demo" && !narrative) {
+      const generated = mockGenerateNarrative({ color, objectResult, matchedCharacter });
+      setNarrative(generated);
+    }
+    setCurrentStage(STAGES.POSTCARD);
+    addLog("唤灵完成，进入第四幕：成色");
+  }, [addLog, mode, narrative, color, objectResult, matchedCharacter]);
+
+  // ── Act4 onFetchSpiritMatch — returns cached data ──
+
+  const fetchSpiritMatch = useCallback(async (payload) => {
+    if (mode === "demo") {
+      const character = mockMatchCharacter(color, objectResult);
+      setMatchedCharacter(character);
+      return {
+        person: {
+          id: character?.name || "zhang-shi",
+          name: character?.name || "张栻",
+          subtitle: [character?.title || "岳麓书院讲学者"],
+          portraitUrl: "",
+        },
+        narrative: {
+          centerStart: ["颜色已经展开", "意象也已经落下。"],
+          centerSeek: ["现在", "我要在千年的文脉里", "寻找一个与你相遇的人。"],
+          loading: ["正在寻找回应你的人……"],
+          found: ["找到了！"],
+          rightInterim: ["他还不能告诉你名字", "你要先听他说完。"],
+          leftBlue: character?.monologue || [],
+          leftYellow: character?.monologue || [],
+          rightFinal: character?.spiritLine
+            ? [character.spiritLine]
+            : ["刚才与你说话的，是他。", "但他留下的不只是名字，", "更是一种敢于发问的底色。"],
+        },
+      };
+    }
+    // Live mode: return pre-cached matchedCharacter data
+    const latest = latestRef.current;
+    if (latest.matchedCharacter) {
+      const ch = latest.matchedCharacter;
+      return {
+        person: {
+          id: ch.name || "unknown",
+          name: ch.name || "回应者",
+          subtitle: [ch.title || ""],
+          portraitUrl: "",
+        },
+        narrative: {
+          centerStart: ["颜色已经展开", "意象也已经落下。"],
+          centerSeek: ["现在", "我要在千年的文脉里", "寻找一个与你相遇的人。"],
+          loading: ["正在寻找回应你的人……"],
+          found: ["找到了！"],
+          rightInterim: ["他还不能告诉你名字", "你要先听他说完。"],
+          leftBlue: ch.monologue || [],
+          leftYellow: ch.monologue || [],
+          rightFinal: ch.spiritLine
+            ? [ch.spiritLine]
+            : [],
+        },
+      };
+    }
+    return null;
+  }, [mode, color, objectResult]);
+
+  // ── Act3 onRecognizeSketch — demo mode ──
+
+  const recognizeSketch = useCallback(async (payload) => {
+    if (mode === "demo") {
+      const result = mockRecognizeObject(points.length > 0 ? points : [{ x: 200, y: 200 }, { x: 400, y: 200 }], color);
+      setObjectResult(result);
+      return {
+        label: result.name,
+        description: [result.reason],
+      };
+    }
+    // Live mode: the sketch data comes from the backend
+    if (objectResult) {
+      return {
+        label: objectResult.name,
+        description: [objectResult.reason || "你画下了一个意象。"],
+      };
+    }
+    return { label: "桥", description: ["你画下了一个意象。"] };
+  }, [mode, points, color, objectResult]);
+
+  // ── Render ──
+
+  const isActPage = currentStage !== "intro_old"; // old intro is gone, all stages are act pages
 
   function renderCurrentStage() {
     switch (currentStage) {
-      case "intro":
-        return <IntroStage onStart={handleStartIntro} />;
-
-      case "color":
+      case STAGES.INTRO:
         return (
-          <ColorStage
-            mode={mode}
-            color={color}
-            colorSource={colorSource}
-            onDetect={handleMockColorDetection}
-            isAutoAdvancing={isAutoAdvancing}
+          <Act0
+            onNext={goToTransition}
+            autoAdvanceDelay={mode === "demo" ? 3500 : 6000}
           />
         );
 
-      case "draw":
+      case STAGES.TRANSITION:
         return (
-          <DrawStage
-            mode={mode}
-            color={color}
-            points={points}
-            objectResult={objectResult}
-            onPointsChange={setPoints}
-            onClear={() => {
-              setPoints([]);
-              setObjectResult(null);
-              setGesture(mode === "demo" ? "index_pointing" : gesture);
-              addLog("清空轨迹，重新筑景");
-            }}
-            onComplete={handleCompleteDrawing}
-            isAutoAdvancing={isAutoAdvancing}
+          <Act1Entry
+            switchDelay={5000}
+            dissolveDelay={13000}
+            onComplete={goToColor}
+            onSkip={goToColor}
+            dissolveOnCompleteDelay={800}
           />
         );
 
-      case "spirit":
+      case STAGES.COLOR:
         return (
-          <SpiritStage
-            status={spiritStatus}
-            character={matchedCharacter}
-            onEnterPostcard={handleEnterPostcard}
+          <Act2ColorSeeking
+            step={colorStep}
+            recognizedColors={color ? [color.hex] : []}
+            copyByStep={buildAct2CopyByStep(color)}
+            autoDemo={false}
+            stepDuration={4500}
+            onComplete={goToDraw}
+            completeDelay={3000}
           />
         );
 
-      case "postcard":
+      case STAGES.DRAW: {
+        const act4Base = buildAct4Payload(color, objectResult);
         return (
-          <PostcardStage
-            color={color}
-            objectResult={objectResult}
-            character={matchedCharacter}
-            narrative={narrative}
+          <Act3FormingVision
+            primaryColor={color?.hex || act4Base.primaryColor}
+            secondaryColor={color?.hex || act4Base.secondaryColor}
+            maxRounds={2}
+            onRecognizeSketch={recognizeSketch}
+            onComplete={goToSpirit}
+            completeDelay={2000}
+            remotePoints={mode === "live" ? points : []}
+          />
+        );
+      }
+
+      case STAGES.SPIRIT: {
+        const a4 = buildAct4Payload(color, objectResult);
+        return (
+          <Act4SpiritCalling
+            primaryColor={a4.primaryColor}
+            secondaryColor={a4.secondaryColor}
+            firstColorName={a4.firstColorName}
+            secondColorName={a4.secondColorName}
+            firstImageryName={a4.firstImageryName}
+            secondImageryName={a4.secondImageryName}
+            onFetchSpiritMatch={fetchSpiritMatch}
+            onComplete={goToPostcard}
+            completeDelay={4000}
+          />
+        );
+      }
+
+      case STAGES.POSTCARD:
+        return (
+          <Act5Postcard
+            postcardData={buildAct5Data(color, objectResult, matchedCharacter, narrative)}
+            autoPlay={true}
+            onComplete={() => addLog("明信片生成完成")}
             onRestart={resetAll}
           />
         );
 
       default:
-        return <IntroStage onStart={handleStartIntro} />;
+        return (
+          <Act0
+            onNext={goToTransition}
+            autoAdvanceDelay={4000}
+          />
+        );
     }
   }
 
   return (
     <div className="min-h-screen bg-ink text-white">
-      <Header
-        mode={mode}
-        onModeChange={handleModeChange}
-        wsStatus={socket.status}
-        wsError={socket.error}
-        onConnect={socket.connect}
-        onDisconnect={socket.disconnect}
-      />
-
-      <div className="border-b border-white/5 bg-black/10 px-4 py-4">
-        <StageStepper currentStage={currentStage} />
+      {/* Fixed overlay header for act pages */}
+      <div className={isActPage ? "fixed top-0 left-0 right-0 z-50 pointer-events-none" : ""}>
+        <div className={isActPage ? "pointer-events-auto" : ""}>
+          <Header
+            mode={mode}
+            onModeChange={handleModeChange}
+            wsStatus={socket.status}
+            wsError={socket.error}
+            onConnect={socket.connect}
+            onDisconnect={socket.disconnect}
+          />
+        </div>
       </div>
 
-      <main className="mx-auto max-w-[1280px] px-4 py-6 md:px-8">
+      {!isActPage && (
+        <div className="border-b border-white/5 bg-black/10 px-4 py-4">
+          <StageStepper currentStage={currentStage} />
+        </div>
+      )}
+
+      <main className={isActPage ? "" : "mx-auto max-w-[1280px] px-4 py-6 md:px-8"}>
         {renderCurrentStage()}
 
-        <details className="mx-auto mt-6 max-w-5xl rounded-xl border border-white/5 bg-black/10 text-sm text-white/45">
-          <summary className="cursor-pointer px-4 py-3 hover:text-white/65">查看系统状态与事件日志</summary>
-          <div className="grid gap-5 border-t border-white/5 p-4 md:grid-cols-2">
-            <div>
-              <p className="eyebrow mb-3">CURRENT STATE</p>
-              <StatusPanel
-                currentStage={currentStage}
-                color={color}
-                colorSource={colorSource}
-                gesture={gesture}
-                objectResult={objectResult}
-                matchedCharacter={matchedCharacter}
-                isAutoAdvancing={isAutoAdvancing}
-              />
+        {/* Debug panel — hidden during act pages */}
+        {!isActPage && (
+          <details className="mx-auto mt-6 max-w-5xl rounded-xl border border-white/5 bg-black/10 text-sm text-white/45">
+            <summary className="cursor-pointer px-4 py-3 hover:text-white/65">查看系统状态与事件日志</summary>
+            <div className="grid gap-5 border-t border-white/5 p-4 md:grid-cols-2">
+              <div>
+                <p className="eyebrow mb-3">CURRENT STATE</p>
+                <StatusPanel
+                  currentStage={currentStage}
+                  color={color}
+                  colorSource={colorSource}
+                  gesture={gesture}
+                  objectResult={objectResult}
+                  matchedCharacter={matchedCharacter}
+                  isAutoAdvancing={isAutoAdvancing}
+                />
+              </div>
+              <div>
+                <p className="eyebrow mb-3">SYSTEM LOG</p>
+                <SystemLog logs={logs} />
+              </div>
             </div>
-            <div>
-              <p className="eyebrow mb-3">SYSTEM LOG</p>
-              <SystemLog logs={logs} />
-            </div>
-          </div>
-        </details>
+          </details>
+        )}
       </main>
     </div>
   );

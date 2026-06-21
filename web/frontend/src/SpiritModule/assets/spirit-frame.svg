@@ -1,0 +1,91 @@
+<svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="spiritGrid" width="42" height="42" patternUnits="userSpaceOnUse">
+      <path d="M42 0H0V42" stroke="#777" stroke-opacity=".14" stroke-width="2"/>
+      <path d="M21 12V30M12 21H30" stroke="#777" stroke-opacity=".17" stroke-width="2"/>
+    </pattern>
+    <pattern id="spiritDots" width="14" height="14" patternUnits="userSpaceOnUse">
+      <circle cx="3" cy="3" r="1.8" fill="#737373" fill-opacity=".24"/>
+      <circle cx="10" cy="9" r="1.1" fill="#737373" fill-opacity=".14"/>
+    </pattern>
+    <pattern id="spiritHatch" width="18" height="18" patternUnits="userSpaceOnUse" patternTransform="rotate(28)">
+      <rect width="5" height="18" fill="#777" fill-opacity=".07"/>
+    </pattern>
+    <linearGradient id="spiritWash" x1="560" y1="185" x2="1300" y2="920" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EAF1FF"/>
+      <stop offset=".58" stop-color="#F6F7EC"/>
+      <stop offset="1" stop-color="#FFF7A0"/>
+    </linearGradient>
+    <linearGradient id="spiritAccent" x1="52" y1="272" x2="52" y2="618" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#29AAFF"/>
+      <stop offset=".48" stop-color="#FFEE00"/>
+      <stop offset="1" stop-color="#3835FF"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1920" height="1080" fill="#F7F7F4"/>
+  <rect width="1920" height="1080" fill="url(#spiritGrid)"/>
+  <path d="M0 0H818V54H0Z" fill="#FFEE00"/>
+  <path d="M584 1022H1920V1080H584Z" fill="#293FFF"/>
+  <path d="M0 0H520V1080H0Z" fill="url(#spiritHatch)" opacity=".58"/>
+  <path d="M1400 0H520V1080H1400Z" fill="url(#spiritHatch)" opacity=".18"/>
+  <path d="M1400 0H520V1080H1400Z" fill="url(#spiritDots)" opacity=".55"/>
+
+  <circle cx="932" cy="538" r="454" fill="url(#spiritWash)" fill-opacity=".43"/>
+  <circle cx="932" cy="538" r="454" stroke="#777" stroke-width="4"/>
+  <circle cx="932" cy="538" r="402" stroke="#A0A0A0" stroke-width="4"/>
+  <circle cx="932" cy="538" r="350" stroke="#777" stroke-opacity=".24" stroke-width="3"/>
+  <ellipse cx="932" cy="538" rx="454" ry="170" stroke="#777" stroke-opacity=".26" stroke-width="3"/>
+  <ellipse cx="932" cy="538" rx="454" ry="280" stroke="#777" stroke-opacity=".2" stroke-width="3"/>
+  <path d="M478 538H1386M932 84V992" stroke="#777" stroke-opacity=".2" stroke-width="3"/>
+  <path d="M356 184C592 326 1350 298 1430 82" stroke="#777" stroke-opacity=".34" stroke-width="4"/>
+  <path d="M272 720C424 992 1220 1048 1452 748" stroke="#777" stroke-opacity=".18" stroke-width="4"/>
+
+  <rect x="646" y="546" width="62" height="70" fill="#3148DF"/>
+  <rect x="688" y="454" width="103" height="93" fill="#FFEE00"/>
+  <rect x="1085" y="514" width="63" height="128" fill="#3148DF"/>
+  <rect x="1151" y="581" width="82" height="75" fill="#FFEE00"/>
+  <rect x="623" y="765" width="110" height="85" fill="#3148DF"/>
+  <path d="M623 850L733 750" stroke="#F7F7F4" stroke-width="3"/>
+  <rect x="737" y="837" width="80" height="81" fill="#3148DF"/>
+  <path d="M737 918L817 837" stroke="#F7F7F4" stroke-width="3"/>
+  <rect x="1038" y="815" width="62" height="70" fill="#3148DF"/>
+  <rect x="1124" y="793" width="145" height="131" fill="#FFEE00"/>
+  <path d="M1124 924L1269 779" stroke="#3148DF" stroke-width="5"/>
+  <circle cx="1080" cy="708" r="41" fill="#3148DF"/>
+  <path d="M1052 680L1108 736M1108 680L1052 736" stroke="#FFEE00" stroke-width="4"/>
+  <g fill="#FFEE00" stroke="#767676" stroke-width="2">
+    <rect x="960" y="422" width="43" height="45" rx="6"/>
+    <rect x="1008" y="422" width="43" height="45" rx="6"/>
+    <rect x="960" y="472" width="43" height="43" rx="6"/>
+    <rect x="1008" y="472" width="43" height="43" rx="6"/>
+  </g>
+  <path d="M970 432L993 457M993 432L970 457M1018 432L1041 457M1041 432L1018 457M970 482L993 505M993 482L970 505M1018 482L1041 505M1041 482L1018 505" stroke="#767676" stroke-width="2"/>
+  <g fill="#FFEE00">
+    <rect x="765" y="696" width="38" height="38" rx="8"/>
+    <rect x="808" y="696" width="38" height="38" rx="8"/>
+    <rect x="765" y="739" width="38" height="38" rx="8"/>
+    <rect x="808" y="739" width="38" height="38" rx="8"/>
+  </g>
+
+  <path d="M52 272V618" stroke="url(#spiritAccent)" stroke-width="6"/>
+  <path d="M48 214H90V256H48Z" fill="#3849FF"/>
+  <path d="M48 214L90 256M90 214L48 256" stroke="#F7F7F4" stroke-width="4"/>
+  <path d="M1844 910H1890V956H1844Z" fill="#3849FF"/>
+  <path d="M1844 910L1890 956M1890 910L1844 956" stroke="#F7F7F4" stroke-width="4"/>
+
+  <text x="14" y="132" fill="#777" font-size="150" font-family="Georgia, 'Times New Roman', serif" font-weight="700" letter-spacing="-8">SPIRIT CALLING</text>
+  <text x="36" y="178" fill="#555" font-size="30" font-family="'Songti SC', SimSun, serif">焚香启境，唤灵归心</text>
+  <text x="1050" y="190" fill="#555" font-size="28" font-family="'Songti SC', SimSun, serif">清音入梦，灵息渐生</text>
+  <text x="74" y="300" fill="#444" font-size="36" font-family="Georgia, serif" transform="rotate(90 74 300)">DISCOVER</text>
+  <text x="1545" y="158" fill="#333" font-size="104" font-family="'Songti SC', SimSun, serif" font-weight="700">唤灵</text>
+  <text x="22" y="1053" fill="#101010" font-size="150" font-family="Georgia, 'Times New Roman', serif" font-weight="700" letter-spacing="-7">AWAKENING</text>
+  <text x="1840" y="620" fill="#555" font-size="34" font-family="Georgia, serif" transform="rotate(90 1840 620)">REVEAL</text>
+
+  <path d="M1440 385L1740 340L1660 100" stroke="#707070" stroke-opacity=".66" stroke-width="4"/>
+  <path d="M1488 218H1600L1560 174H1525Z" fill="#777"/>
+  <circle cx="1670" cy="292" r="25" fill="#838383"/>
+  <path d="M1760 54H1910L1870 96H1720Z" fill="#777"/>
+  <path d="M1780 270L1870 242L1888 302L1798 330Z" fill="#929292"/>
+  <path d="M1808 230L1860 342M1902 248L1764 316" stroke="#777" stroke-width="14"/>
+</svg>

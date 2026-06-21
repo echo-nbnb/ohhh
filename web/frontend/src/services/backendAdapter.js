@@ -43,7 +43,6 @@ export function normalizeBackendMessage(payload) {
     case "objects_summary":
     case "character_search_start":
     case "character_found":
-    case "character_revealed":
     case "character_confirmed":
       return {
         type: MESSAGE_TYPES.SYSTEM_LOG,
@@ -51,11 +50,35 @@ export function normalizeBackendMessage(payload) {
         message: asStr(payload.message),
       };
 
-    // ---- Hand tracking → drawing_point (食指指尖 landmarks[8]) ----
+    // ---- Character revealed → 更新人物到前端 ----
+    case "character_revealed":
+      return {
+        type: MESSAGE_TYPES.CHARACTER_MATCHED,
+        character: {
+          name: asStr(payload.name, "回应者"),
+          title: asStr(payload.title),
+          reason: asStr(payload.message),
+          monologue: [],
+          spiritLine: "",
+        },
+      };
+
+    // ---- drawing_point (真实摄像头直接发送) ----
+    case "drawing_point":
+      return {
+        type: MESSAGE_TYPES.DRAWING_POINT,
+        x: asNum(payload.x),
+        y: asNum(payload.y),
+      };
+
+    // ---- Hand tracking → drawing_point (备选: 从手部通道提取食指指尖) ----
     case "hand_tracking": {
       const ft = payload.fingertips;
-      if (Array.isArray(ft) && ft.length >= 2) {
-        const tip = ft[1]; // 食指
+      if (Array.isArray(ft) && ft.length >= 4) {
+        // 平面数组 [thumb_x, thumb_y, index_x, index_y, ...]
+        if (typeof ft[0] === "number") return { type: MESSAGE_TYPES.DRAWING_POINT, x: ft[2], y: ft[3] };
+        // 嵌套数组 [[x,y], [x,y], ...]
+        const tip = ft[1]; // 食指 (index 1)
         if (Array.isArray(tip) && tip.length >= 2) return { type: MESSAGE_TYPES.DRAWING_POINT, x: tip[0], y: tip[1] };
         if (tip && typeof tip === "object") return { type: MESSAGE_TYPES.DRAWING_POINT, x: tip.x ?? tip[0] ?? 0, y: tip.y ?? tip[1] ?? 0 };
       }
@@ -92,17 +115,12 @@ export function normalizeBackendMessage(payload) {
       };
     }
 
-    // ---- Character performance → character_matched (如没 candidates 的兜底) ----
+    // ---- Character performance → system_log (不覆盖已设置的人物) ----
     case "character_performance":
       return {
-        type: MESSAGE_TYPES.CHARACTER_MATCHED,
-        character: {
-          name: "",
-          title: "",
-          reason: "",
-          monologue: asArr(payload.paragraphs),
-          spiritLine: "",
-        },
+        type: MESSAGE_TYPES.SYSTEM_LOG,
+        level: "info",
+        message: asArr(payload.paragraphs).join(" "),
       };
 
     // ---- Generation → narrative_generated ----
@@ -121,6 +139,14 @@ export function normalizeBackendMessage(payload) {
         imageUrl: asStr(payload.image_url),
         qrBase64: asStr(payload.qr_base64),
         uniqueId: asStr(payload.unique_id),
+      };
+
+    // ---- Backend connected → 重置前端到第一幕 ----
+    case "connected":
+      return {
+        type: MESSAGE_TYPES.SYSTEM_LOG,
+        level: "info",
+        message: "后端已就绪，等待择色…",
       };
 
     // ---- Gesture state 直通 ----

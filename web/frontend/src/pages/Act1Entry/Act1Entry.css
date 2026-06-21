@@ -1,0 +1,193 @@
+.act1 {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #f6f6f3;
+  user-select: none;
+}
+
+/* 静止背景 */
+.act1__bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 压一层很淡的白，让彩带更像融在背景里 */
+.act1__veil {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.0);
+  pointer-events: none;
+}
+
+/* 彩带 — X 轴铺满，保持比例，居中呼吸 */
+.act1__ribbon {
+  position: absolute;
+  left: 0;
+  top: 38%;
+  width: 100%;
+  height: auto;
+  transform: translateY(-50%);
+  opacity: 1;
+  z-index: 3;
+  pointer-events: none;
+  animation: act1RibbonBreath 10s ease-in-out infinite;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+/* 文字公共样式 */
+.act1__copy {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.act1__copy img {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.07));
+}
+
+/* 邀请文字位置 */
+.act1__invite {
+  left: 50%;
+  top: 63.5%;
+  width: min(28vw, 360px);
+  transform: translate(-50%, -50%);
+}
+
+/* 第二段文字略小一点 */
+.act1__invite2 {
+  width: min(26vw, 340px);
+}
+
+/* 文字切换淡入淡出 */
+.act1__fade {
+  opacity: 0;
+  transition:
+    opacity 0.85s ease,
+    transform 0.85s cubic-bezier(0.18, 0.86, 0.35, 1),
+    filter 0.85s ease;
+}
+
+.act1__fade.is-active {
+  opacity: 1;
+}
+
+.act1__fade:not(.is-active) {
+  transform: translate(-50%, -46%) scale(0.985);
+  filter: blur(5px);
+}
+
+/* 落款位置 */
+.act1__signature {
+  left: 69%;
+  top: 83%;
+  width: min(22vw, 300px);
+  transform: translate(-50%, -50%);
+  opacity: 1;
+  transition:
+    opacity 0.85s ease,
+    transform 0.85s cubic-bezier(0.18, 0.86, 0.35, 1),
+    filter 0.85s ease;
+}
+
+.act1__signature.is-hidden,
+.act1__signature.is-dissolving {
+  opacity: 0;
+  transform: translate(-50%, -44%) scale(0.985);
+  filter: blur(12px);
+}
+
+/* 全屏淡出：背景、彩带、icon 一起消失 */
+.act1--fading .act1__bg,
+.act1--fading .act1__ribbon,
+.act1--fading .act1__icons {
+  opacity: 0;
+  filter: blur(8px);
+  transition:
+    opacity 1.2s ease-in,
+    filter 1.2s ease-in;
+}
+
+/* 碎光散开：文字模糊消散 */
+.act1__fade.is-dissolving {
+  opacity: 0;
+  filter: blur(12px);
+  transform: translate(-50%, -48%) scale(1.04);
+  transition:
+    opacity 0.8s ease-in,
+    filter 0.8s ease-in,
+    transform 0.8s ease-in;
+}
+
+/* 彩带整体缓慢呼吸 */
+@keyframes act1RibbonBreath {
+  0% {
+    transform: translateY(-50%) scaleY(0.92);
+  }
+  50% {
+    transform: translateY(-50%) scaleY(1.08);
+  }
+  100% {
+    transform: translateY(-50%) scaleY(0.92);
+  }
+}
+
+/* 飘动 icon — 同第零幕 */
+.act1__icons {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.act1__icon {
+  position: absolute;
+  object-fit: contain;
+  animation: act1IconFloat var(--duration) ease-in-out infinite alternate;
+  animation-delay: var(--delay);
+  will-change: transform, opacity;
+}
+
+@keyframes act1IconFloat {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(0.85);
+    opacity: 0.5;
+  }
+  30% {
+    opacity: 0.85;
+  }
+  70% {
+    opacity: 0.55;
+  }
+  100% {
+    transform:
+      translate3d(var(--drift-x), var(--drift-y), 0)
+      rotate(65deg)
+      scale(1.15);
+    opacity: 0.4;
+  }
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .act1__invite {
+    top: 63%;
+    width: 44vw;
+  }
+  .act1__signature {
+    left: 66%;
+    top: 82%;
+    width: 34vw;
+  }
+}

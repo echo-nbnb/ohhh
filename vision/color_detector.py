@@ -56,8 +56,8 @@ COLOR_HEX_VALUES = {
         "hsv_range": ((10, 60, 60), (35, 200, 255))
     },
     "墨色": {
-        "hsv_center": (0, 10, 30),
-        "hsv_range": ((0, 0, 0), (180, 50, 60))
+        "hsv_center": (0, 5, 18),
+        "hsv_range": ((0, 0, 0), (180, 25, 35))
     }
 }
 
@@ -196,6 +196,10 @@ class ObjectColorDetector:
                 best_color = color_name
 
         if best_score < 0.25:
+            return None, 0.0
+
+        # 墨色特殊处理：只有真正的深暗色才接受，避免室内暗区误匹配
+        if best_color == "墨色" and v > 35:
             return None, 0.0
 
         return best_color, round(best_score, 3)

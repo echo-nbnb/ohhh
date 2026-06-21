@@ -275,6 +275,14 @@ class GestureStateMachine:
             # 食指伸出 → 进入绘画模式
             self._transition_to(GestureMode.DRAWING, "TRACKING")
             self.drawing_sub = DrawingSubState.TRACKING
+        elif gesture_changed and self.current_gesture == GestureType.FIST:
+            # 握拳 → 直接重新择色（一步到位：切回第一幕 + 立即触发颜色检测）
+            self.color_extraction_sub = ColorExtractionSubState.AWAITING_OBJECT
+            self._transition_to(GestureMode.COLOR_EXTRACTION, "AWAITING_OBJECT")
+            # 立即进入分析状态，不需要二次握拳
+            self.color_extraction_sub = ColorExtractionSubState.OBJECT_ANALYZING
+            if self.on_object_color_detected:
+                self.on_object_color_detected()
 
     def _process_drawing(self, gesture_changed: bool, landmarks: List, ts_ms: int):
         if self.drawing_sub == DrawingSubState.TRACKING:

@@ -1,0 +1,60 @@
+.dissolve-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.dissolve-particle {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(220, 200, 150, 0.9) 0%, rgba(200, 170, 100, 0.4) 50%, transparent 100%);
+  box-shadow:
+    0 0 4px rgba(255, 240, 180, 0.8),
+    0 0 10px rgba(220, 180, 100, 0.5),
+    0 0 20px rgba(200, 150, 60, 0.3);
+  animation: dissolveFloat var(--duration) ease-out forwards;
+  animation-delay: var(--delay);
+  will-change: transform, opacity;
+}
+
+@keyframes dissolveFloat {
+  0% {
+    transform: translate(0, 0) scale(0.3) rotate(0deg);
+    opacity: 1;
+  }
+  30% {
+    transform:
+      translate(calc(var(--drift-x) * 0.2), calc(var(--drift-y) * 0.2))
+      scale(1.6)
+      rotate(calc(var(--rotate) * 0.3));
+    opacity: 0.9;
+  }
+  100% {
+    transform:
+      translate(var(--drift-x), var(--drift-y))
+      scale(0)
+      rotate(var(--rotate));
+    opacity: 0;
+  }
+}
+
+/* 全屏白屏过渡 */
+.dissolve-white {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background: #fafaf7;
+  animation: whiteIn 1s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes whiteIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
