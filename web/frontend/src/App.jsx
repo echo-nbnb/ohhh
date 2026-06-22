@@ -282,7 +282,7 @@ export default function App() {
   const recognizeSketch = useCallback(async (payload) => {
     console.log("[App] recognizeSketch — mode:", mode, "cached:", latestRef.current.objectResult?.name);
     if (mode === "demo") {
-      const validObjects = ["石桥","古树","书卷","岳麓书院","湘江","爱晚亭","碑刻","竹林","讲堂","石阶","岳麓山","长廊"];
+      const validObjects = ["石桥","古树","书卷","岳麓书院","湘江","爱晚亭","碑刻","竹林","讲堂","石阶","岳麓山","长廊","东方红广场","中国书院博物馆","书架","书案","匾额","古籍","图书馆","墨锭","学位帽","实验室","屋脊","山石","操场","教学楼","显微镜","林荫道","校徽","校门","楹联","毛笔","湖南大学大礼堂","牌楼路","白鹤泉","砚台","窗格","竹简","笔记本","线装书","经卷","自卑亭","荣誉证书","设计院楼","赫曦台","院墙","麓山南路","黑板"];
       const label = validObjects[Math.floor(Math.random() * validObjects.length)];
       const result = { name: label, reason: `你画下了${label}。`, stylizedImageUrl: `/src/assets/act3/objects/${label}.png` };
       setObjectResult(result);
@@ -397,7 +397,7 @@ export default function App() {
         // Dedup object name: use ref (state may be stale)
         let objName = message.name;
         if (usedObjectNamesRef.current.includes(objName)) {
-          const fallbacks = ["古树","书卷","石阶","岳麓书院","竹简","碑刻","讲堂","爱晚亭","石桥","长廊","匾额","竹林"];
+          const fallbacks = ["古树","书卷","石阶","岳麓书院","竹简","碑刻","讲堂","爱晚亭","石桥","长廊","匾额","竹林","东方红广场","古籍","线装书","经卷","墨锭","砚台","毛笔","窗格","院墙","屋脊","自卑亭","赫曦台","校门","林荫道","湘江","白鹤泉","山石","图书馆","书架","书案","学位帽","校徽","荣誉证书","笔记本","黑板"];
           const unused = fallbacks.filter(n => !usedObjectNamesRef.current.includes(n));
           objName = unused[Math.floor(Math.random() * unused.length)];
           console.log("[App] Object dedup: same name, fallback to", objName);

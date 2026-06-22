@@ -609,7 +609,8 @@ class IntegratedServer:
                 # 识别结果为空 → 兜底随机物象
                 import random as _r
                 _fallback = [("古树", 0.35, "tree"), ("书卷", 0.30, "book"),
-                             ("石阶", 0.28, "stairs"), ("林荫道", 0.25, "tree")]
+                             ("石阶", 0.28, "stairs"), ("林荫道", 0.25, "tree"),
+                             ("岳麓书院", 0.32, "house"), ("爱晚亭", 0.26, "castle")]
                 name, score, qd_cat = _r.choice(_fallback)
                 self.fsm._recognized_object = (name, score, qd_cat)
                 self._send_main({"type": "object_recognized", "color": self.current_color,
@@ -1328,7 +1329,7 @@ class _DirectSketchBridge:
             # 降级：返回假候选
             return [
                 {"name": "古树", "score": 0.88, "qd_category": "tree"},
-                {"name": "竹林", "score": 0.72, "qd_category": "tree"},
+                {"name": "岳麓书院", "score": 0.72, "qd_category": "house"},
                 {"name": "石阶", "score": 0.55, "qd_category": "stairs"},
             ]
 
