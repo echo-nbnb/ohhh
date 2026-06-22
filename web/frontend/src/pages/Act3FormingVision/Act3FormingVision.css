@@ -19,7 +19,7 @@
 .act3__remoteCanvas{position:absolute;inset:0;z-index:13;width:100%;height:100%;pointer-events:none}
 .act3__resultsLayer{position:absolute;inset:0;z-index:14;pointer-events:none}
 .act3__resultItem{position:absolute;inset:0}
-.act3__resultVisual{position:absolute;transform:translate(-50%,-50%);opacity:0;mix-blend-mode:multiply;filter:drop-shadow(0 10px 20px rgba(0,0,0,0.08));animation:act3VisualIn 0.9s ease forwards;--final-opacity:0.5}
+.act3__resultVisual{position:absolute;transform:translate(-50%,-50%);max-width:50vw;max-height:50vh;opacity:0;mix-blend-mode:multiply;filter:drop-shadow(0 10px 20px rgba(0,0,0,0.08));animation:act3VisualIn 0.9s ease forwards;--final-opacity:0.5}
 .act3__resultCaption{position:absolute;max-width:24vw;color:#4f4f4f;font-family:"Source Han Serif CN","Noto Serif SC","Songti SC",serif;font-size:clamp(15px,1.28vw,21px);line-height:1.8;letter-spacing:0.04em;text-shadow:0 2px 14px rgba(255,255,255,0.92);opacity:0;filter:blur(5px);animation:act3CaptionIn 0.8s ease 0.25s forwards}
 .act3__resultCaption--right{transform:translate(8vw,-50%);text-align:left}
 .act3__resultCaption--left{transform:translate(-30vw,-50%);text-align:right}
