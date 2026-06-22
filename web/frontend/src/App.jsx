@@ -133,6 +133,7 @@ export default function App() {
   const drawPositionsRef = useRef([]);        // accumulate points for position calc
   const resetCooldownUntil = useRef(0);      // ignore gestures/colors until timestamp
   const remoteDrawRef = useRef(null);         // direct canvas draw callback (bypass React)
+  const colorConfirmedRef = useRef(false);     // 后端确认颜色后才允许进入 Act3
 
   useEffect(() => { colorsRef.current = colors; }, [colors]);
 
@@ -234,6 +235,10 @@ export default function App() {
   useEffect(() => { goToTransitionRef.current = goToTransition; }, [goToTransition]);
 
   const goToDraw = useCallback(() => {
+    if (!colorConfirmedRef.current) {
+      console.log("[App] goToDraw blocked — 等待后端 color_confirmed");
+      return;
+    }
     console.log("[App] goToDraw → Act3");
     setCurrentStage(STAGES.DRAW); setIsAutoAdvancing(false);
     addLog("择色完成，进入第二幕：筑景");
@@ -265,6 +270,7 @@ export default function App() {
     setMatchedCharacter(null); setSpiritStatus("idle"); setNarrative(null);
     setIsAutoAdvancing(false); setColorStep(1); setWaitingForStamp(false);
     fistTriggeredRef.current = false; colorLockedRef.current = false;
+    colorConfirmedRef.current = false;
     liveObjectCountRef.current = 0;
     usedObjectNamesRef.current = [];
     resetCooldownUntil.current = Date.now() + 3000; // 3s grace after reset
@@ -325,6 +331,13 @@ export default function App() {
       case MESSAGE_TYPES.COLOR_DETECTED:
         // Cooldown after reset: ignore rapid color messages
         if (Date.now() < resetCooldownUntil.current) break;
+        // 颜色确认 → 允许进入 Act3
+        if (message.source === "confirmed") {
+          colorConfirmedRef.current = true;
+          if (stageRef.current === STAGES.COLOR) {
+            setTimeout(() => goToDraw(), 500);
+          }
+        }
         // Only process color when on COLOR or DRAW stage or later (not during Act1)
         if (stageRef.current === STAGES.INTRO || stageRef.current === STAGES.TRANSITION) {
           // Cache color silently with dedup+fallback

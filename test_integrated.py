@@ -1151,17 +1151,24 @@ class IntegratedServer:
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, u_color, 2)
             else:
                 self.fsm.process(None, ts)
-                # Auto-commit drawing if hand lost for 3 seconds
+                # Auto-commit drawing if hand lost for 3 seconds (需有足够轨迹点)
                 if self.fsm.is_drawing:
                     self._hand_lost_frames += 1
                     if self._hand_lost_frames == 1:
                         print(f"  [Auto] 开始计数: is_drawing={self.fsm.is_drawing} sub={self.fsm.drawing_sub} traj={len(self.fsm.trajectory)}")
                     if self._hand_lost_frames >= 90:
-                        print(f"  [Auto-Commit] 手部消失3秒提交，轨迹点={len(self.fsm.trajectory)}")
-                        traj = list(self.fsm.trajectory)
-                        self._on_drawing_commit(traj)
-                        self.fsm.trajectory.clear()
-                        self.fsm._transition_to(GestureMode.GLOBAL, "IDLE")
+                        if len(self.fsm.trajectory) >= 10:
+                            print(f"  [Auto-Commit] 手部消失3秒提交，轨迹点={len(self.fsm.trajectory)}")
+                            traj = list(self.fsm.trajectory)
+                            self._on_drawing_commit(traj)
+                            self.fsm.trajectory.clear()
+                            self.fsm._transition_to(GestureMode.GLOBAL, "IDLE")
+                        else:
+                            print(f"  [Auto-Cancel] 轨迹点不足 ({len(self.fsm.trajectory)})，取消绘画")
+                            self.fsm.trajectory.clear()
+                            self.fsm._transition_to(GestureMode.GLOBAL, "IDLE")
+                            self._send_main({"type": "drawing_cancelled",
+                                             "message": "没关系。有些图像，需要再画一次才会清晰。"})
                         self._hand_lost_frames = 0
                 # ── 无手部帧日志（每60帧一次）──
                 if self.frame_count - _last_log_frame >= 60:
