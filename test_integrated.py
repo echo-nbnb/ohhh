@@ -129,6 +129,7 @@ class IntegratedServer:
         self._pending_postcard_data = None    # 缓存明信片数据等截图
         self._hand_lost_frames = 0            # 手部丢失帧计数（自动提交用）
         self._color_done = False              # 颜色确认后才开始绘画
+        self._collected_colors: List[str] = []  # 收集的两种颜色
         self._send_lock = threading.Lock()    # 保护 _send_main 并发访问
         self._pipeline_running = False        # 防止重复启动人物管线
 
@@ -211,9 +212,22 @@ class IntegratedServer:
             except Exception as e:
                 print(f"     电脑摄像头失败: {e}")
 
-        # 衣物颜色：用随机选色，不开摄像头
-        print("[1c] 衣物颜色：随机模式")
-        self.webcam = None
+        # 衣物颜色：尝试开电脑摄像头做真实检测
+        print("[1c] 衣物颜色：电脑摄像头")
+        webcam_ok = False
+        try:
+            self.webcam = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            if self.webcam.isOpened():
+                self.webcam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                self.webcam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                print("[OK] 衣物颜色摄像头已就绪")
+                webcam_ok = True
+        except Exception as e:
+            print(f"     衣物摄像头失败: {e}")
+
+        if not webcam_ok:
+            self.webcam = None
+            print("[!] 衣物颜色摄像头不可用，将随机兜底")
 
         return ok
 
@@ -282,9 +296,14 @@ class IntegratedServer:
         except Exception as e:
             print(f"[!] ObjectColorDetector 初始化失败: {e}")
 
-        # 衣物颜色：直接随机，不另开摄像头
-        self.webcam_color_detector = None
-        print("[OK] 衣物颜色随机模式")
+        # 衣物颜色检测器（simple 方法，不依赖 MediaPipe）
+        try:
+            from vision.webcam_color_detector import WebcamColorDetector
+            self.webcam_color_detector = WebcamColorDetector(method="simple")
+            print("[OK] WebcamColorDetector 已就绪 (simple)")
+        except Exception as e:
+            print(f"[!] WebcamColorDetector 初始化失败: {e}，将随机兜底")
+            self.webcam_color_detector = None
 
         # 草图识别器
         try:
@@ -353,6 +372,7 @@ class IntegratedServer:
                 self._pipeline_running = False
                 self._hand_lost_frames = 0
                 self._waiting_for_screenshot = False
+                self._collected_colors.clear()
                 self.selected_objects.clear()
                 self.sketch_trajectories.clear()
                 self._pending_trajectory = []
@@ -739,13 +759,13 @@ class IntegratedServer:
                            f"一位与「{top.get('reason','')}」有关的人，正向你走来。",
                 "context": {"color": color, "objects": objs}
             })
-            time.sleep(3.0)
+            time.sleep(1.5)
             self._send_main({
                 "type": "character_found",
                 "message": "找到了。",
                 "character_name_hidden": True
             })
-            time.sleep(3.0)
+            time.sleep(1.5)
 
             # ── LLM 独白 + 叙事（DeepSeek，失败 fallback 模板）──
             ch_name = top.get('name', '')
@@ -788,7 +808,7 @@ class IntegratedServer:
                 "character": "????",
                 "paragraphs": perf
             })
-            time.sleep(3.0)
+            time.sleep(1.5)
 
             # ── 人物揭示 ──
             portrait_map = {
@@ -807,7 +827,7 @@ class IntegratedServer:
                 "monologue": perf,
                 "message": f"刚才与你说话的，是{ch_name}。"
             })
-            time.sleep(3.0)
+            time.sleep(1.5)
 
             # ── 叙事生成 ──
             narrative_text = llm_narrative if llm_narrative else [
@@ -905,6 +925,7 @@ class IntegratedServer:
     def _on_color_extraction_start(self):
         """颜色提取开始"""
         self._color_done = False  # 新一 round 择色，重置绘画就绪标记
+        self._collected_colors.clear()  # 清空已收集的颜色
         print("  [FSM] 颜色提取开始")
         self._send_main({
             "type": "color_extraction_start",
@@ -947,19 +968,48 @@ class IntegratedServer:
                 self.fsm.trigger_object_color_detected(False)
                 return
 
-            # 匹配成功 → 自动确认，直接进入 GLOBAL
-            self.current_color = result.color_name
-            _debug_log.info(f"COLOR_RESULT | stage=match | result=OK | color={result.color_name} | conf={result.confidence:.2f} | AUTO_CONFIRM")
-            print(f"  → 物件颜色: {result.color_name} (置信度: {result.confidence:.2f}) → 自动确认")
-            self._send_main({
-                "type": "object_color_detected",
-                "color": result.color_name,
-                "confidence": round(result.confidence, 3),
-                "source": "object",
-                "message": f"我捕捉到了一抹{result.color_name}。",
-            })
-            # 直接确认，跳过二次握拳
-            self.fsm.trigger_color_confirmed()
+            # 匹配成功 → 收集颜色，需要两种不同颜色才确认
+            color_name = result.color_name
+            _debug_log.info(f"COLOR_RESULT | stage=match | result=OK | color={color_name} | conf={result.confidence:.2f}")
+            print(f"  → 物件颜色: {color_name} (置信度: {result.confidence:.2f})")
+
+            if color_name in self._collected_colors:
+                # 同色 → 提示换一个
+                self._send_main({
+                    "type": "object_color_detected",
+                    "color": color_name,
+                    "confidence": round(result.confidence, 3),
+                    "source": "object",
+                    "message": f"又看到了{color_name}。请换一件不同颜色的随身之物。",
+                })
+                # 回到等待状态
+                self.fsm.color_extraction_sub = ColorExtractionSubState.AWAITING_OBJECT
+                return
+
+            self._collected_colors.append(color_name)
+            if len(self._collected_colors) == 1:
+                # 第一种颜色 → 提示放第二件
+                self.current_color = color_name
+                self._send_main({
+                    "type": "object_color_detected",
+                    "color": color_name,
+                    "confidence": round(result.confidence, 3),
+                    "source": "object",
+                    "message": f"我捕捉到了一抹{color_name}。请将另一件随身之物靠近光中。",
+                })
+                # 回到等待状态，等第二件
+                self.fsm.color_extraction_sub = ColorExtractionSubState.AWAITING_OBJECT
+            else:
+                # 第二种颜色 → 确认两色，进入 GLOBAL
+                self._send_main({
+                    "type": "object_color_detected",
+                    "color": color_name,
+                    "confidence": round(result.confidence, 3),
+                    "source": "object",
+                    "message": f"又见{color_name}。两色相遇，这座书院的颜色有了轮廓。",
+                })
+                # current_color 保持第一个颜色
+                self.fsm.trigger_color_confirmed()
         except Exception as e:
             print(f"  → 物件颜色检测异常: {e}")
             self._send_main({
@@ -969,10 +1019,11 @@ class IntegratedServer:
             self.fsm.trigger_object_color_detected(False)
 
     def _on_clothing_fallback(self):
-        """衣物兜底"""
+        """衣物兜底 — 电脑摄像头真检测，失败则随机"""
         import random as _random
         _fallback_colors = ["朱红","灯橙","梨黄","叶绿","瓷青","海蓝","烟紫","枫红","暖橙","藤黄","玉绿","石青","澄蓝","影紫","桃红","夕橙","桂黄","茶绿","湖青","沧蓝","黛紫"]
         print("  [FSM] 触发衣物兜底")
+
         if self.webcam_color_detector is None:
             pick = _random.choice(_fallback_colors)
             print(f"  → WebcamColorDetector 未就绪，随机选择: {pick}")
@@ -984,19 +1035,29 @@ class IntegratedServer:
             self.fsm.trigger_clothing_color_detected(False)
             return
 
-        try:
-            webcam_frame = self.webcam_color_detector.read_frame()
-            if webcam_frame is None:
-                pick = _random.choice(_fallback_colors)
-                print(f"  → 摄像头读取失败，随机选择: {pick}")
-                self.current_color = pick
-                self._send_main({
-                    "type": "clothing_color_failed",
-                    "message": f"今天的你，颜色也不愿被命名。那就让{pick}替你开始吧。"
-                })
-                self.fsm.trigger_clothing_color_detected(False)
-                return
+        # 获取衣物检测帧：优先用独立摄像头，否则用主摄像头当前帧
+        webcam_frame = None
+        if self.webcam is not None and self.webcam.isOpened():
+            for _ in range(3):
+                ret, f = self.webcam.read()
+                if ret and f is not None:
+                    webcam_frame = f
+                    break
+        elif self._current_frame is not None:
+            webcam_frame = self._current_frame
 
+        if webcam_frame is None:
+            pick = _random.choice(_fallback_colors)
+            print(f"  → 衣物摄像头不可用，随机选择: {pick}")
+            self.current_color = pick
+            self._send_main({
+                "type": "clothing_color_failed",
+                "message": f"今天的你，颜色也不愿被命名。那就让{pick}替你开始吧。"
+            })
+            self.fsm.trigger_clothing_color_detected(False)
+            return
+
+        try:
             color_name, confidence = self.webcam_color_detector.detect(webcam_frame)
             if color_name is None:
                 pick = _random.choice(_fallback_colors)
@@ -1349,6 +1410,11 @@ class IntegratedServer:
         if self.camera:
             try:
                 self.camera.release()
+            except Exception:
+                pass
+        if self.webcam:
+            try:
+                self.webcam.release()
             except Exception:
                 pass
         if self.hand_tracker:
