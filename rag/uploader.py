@@ -82,7 +82,7 @@ class PostcardUploader:
         short = str(uuid.uuid4())[:6]
         return f"ML{ts}_{short}"
 
-    def _make_qr(self, url: str, size: int = 800) -> Image.Image:
+    def _make_qr(self, url: str, size: int = 1600) -> Image.Image:
         """生成二维码"""
         qr = qrcode.QRCode(
             version=1,
