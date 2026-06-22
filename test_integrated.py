@@ -24,10 +24,17 @@ import sys
 import time
 import threading
 import logging
+import numpy as np
 from datetime import datetime
 from typing import Optional, Dict, List
 
 sys.path.insert(0, ".")
+
+from vision.gesture_state_machine import GestureMode, DrawingSubState  # noqa: E402
+
+# ── DeepSeek API 配置 ──
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/chat/completions"
 
 # 配置日志
 logging.basicConfig(
@@ -121,6 +128,9 @@ class IntegratedServer:
         self._waiting_for_screenshot = False  # 等前端截图再生成明信片
         self._pending_postcard_data = None    # 缓存明信片数据等截图
         self._hand_lost_frames = 0            # 手部丢失帧计数（自动提交用）
+        self._color_done = False              # 颜色确认后才开始绘画
+        self._send_lock = threading.Lock()    # 保护 _send_main 并发访问
+        self._pipeline_running = False        # 防止重复启动人物管线
 
     # ── 启动 ───────────────────────────────────────────────
 
@@ -201,17 +211,9 @@ class IntegratedServer:
             except Exception as e:
                 print(f"     电脑摄像头失败: {e}")
 
-        # 衣物颜色检测专用摄像头（始终开电脑摄像头）
-        print("[1c] 电脑摄像头（衣物颜色检测）...")
-        try:
-            self.webcam = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-            if self.webcam.isOpened():
-                self.webcam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                self.webcam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                print("[OK] 衣物颜色摄像头已就绪")
-        except Exception as e:
-            print(f"     衣物摄像头失败: {e}")
-            self.webcam = None
+        # 衣物颜色：用随机选色，不开摄像头
+        print("[1c] 衣物颜色：随机模式")
+        self.webcam = None
 
         return ok
 
@@ -229,7 +231,7 @@ class IntegratedServer:
 
     def _init_gesture_fsm(self):
         print("[3] 初始化手势状态机...")
-        from vision.gesture_state_machine import create_gesture_state_machine, GestureMode, DrawingSubState
+        from vision.gesture_state_machine import create_gesture_state_machine
         self.fsm = create_gesture_state_machine(debounce_frames=3)
 
         # 回调：模式切换 → 发送到前端
@@ -280,28 +282,9 @@ class IntegratedServer:
         except Exception as e:
             print(f"[!] ObjectColorDetector 初始化失败: {e}")
 
-        # 电脑端摄像头衣物颜色检测器（超时保护，防止卡住 TCP 启动）
-        try:
-            from vision.webcam_color_detector import WebcamColorDetector
-            self.webcam_color_detector = WebcamColorDetector()
-            # 在子线程中打开摄像头，最多等 3 秒
-            result = {"ok": False}
-            def _open_webcam():
-                try:
-                    result["ok"] = self.webcam_color_detector.open()
-                except Exception:
-                    pass
-            t = threading.Thread(target=_open_webcam, daemon=True)
-            t.start()
-            t.join(timeout=3.0)
-            if result["ok"]:
-                print("[OK] WebcamColorDetector 已就绪")
-            else:
-                print("[!] WebcamColorDetector 不可用（衣物兜底将跳过）")
-                self.webcam_color_detector = None
-        except Exception as e:
-            print(f"[!] WebcamColorDetector 初始化失败: {e}")
-            self.webcam_color_detector = None
+        # 衣物颜色：直接随机，不另开摄像头
+        self.webcam_color_detector = None
+        print("[OK] 衣物颜色随机模式")
 
         # 草图识别器
         try:
@@ -355,19 +338,39 @@ class IntegratedServer:
                 client, addr = self.main_server.accept()
                 client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 print(f"\n[前端] 主通道已连接: {addr}")
+
+                # 断开旧客户端（如果有）
+                if self.main_client:
+                    try:
+                        self.main_client.close()
+                    except Exception:
+                        pass
+
                 self.main_client = client
-                # 新连接 → 重置状态
-                self.selected_objects.clear()
-                self.sketch_trajectories.clear()
-                self._pending_trajectory = []
-                self.fsm._recognized_object = None
+
+                # 只在空闲状态才重置，流程进行中则保持当前状态
                 if self.fsm:
-                    self.fsm.reset_to_global()
-                    self.fsm.trigger_color_extraction_start()
-                _debug_log.info("STATE_RESET | 新客户端连接，重置回 COLOR_EXTRACTION")
+                    current_mode = self.fsm.mode.value
+                    if current_mode == "COLOR_EXTRACTION" and not self._color_done:
+                        # 空闲 → 安全重置
+                        self.selected_objects.clear()
+                        self.sketch_trajectories.clear()
+                        self._pending_trajectory = []
+                        self.fsm._recognized_object = None
+                        self.fsm.reset_to_global()
+                        self.fsm.trigger_color_extraction_start()
+                        _debug_log.info("STATE_RESET | 新客户端连接（空闲），重置回 COLOR_EXTRACTION")
+                    else:
+                        # 流程进行中 → 保持状态，只同步给新前端
+                        _debug_log.info(f"STATE_KEEP | 流程进行中 mode={current_mode}，保持当前状态")
+                else:
+                    self.selected_objects.clear()
+                    self.sketch_trajectories.clear()
+                    self._pending_trajectory = []
+
                 self._send_main({"type": "connected",
                                  "message": "integrated_server_ready"})
-                # 发送初始手势状态
+                # 发送当前手势状态（同步给新前端）
                 self._send_gesture_state()
                 self._handle_main_loop(client)
             except socket.timeout:
@@ -418,8 +421,6 @@ class IntegratedServer:
             data = json.loads(msg)
             msg_type = data.get("type", data.get("event", ""))
             print(f"[前端→] {msg_type}: {json.dumps(data, ensure_ascii=False)[:80]}")
-            if msg_type == "screenshot_upload":
-                print(f"[Screenshot] RECEIVED! Size: {len(data.get('image_base64',''))}")
 
             if msg_type == "gesture_simulate":
                 # TCP 手势模拟（测试用）
@@ -470,6 +471,7 @@ class IntegratedServer:
                 pass
             elif msg_type == "screenshot_upload":
                 # 前端发来的明信片截图 → 上传OSS → 回传URL → 重置
+                print(f"[Screenshot] RECEIVED! Size: {len(data.get('image_base64',''))}")
                 import base64 as b64
                 import io as _io
                 from PIL import Image as _PILImage
@@ -513,17 +515,19 @@ class IntegratedServer:
     def _send_main(self, data: dict):
         msg_type = data.get("type", "?")
         _debug_log.debug(f"SEND_MAIN | type={msg_type} | {json.dumps(data, ensure_ascii=False)[:200]}")
-        if not self.main_client:
-            print(f"  [SEND:DROP] {msg_type} — main_client 未连接")
-            return
-        try:
-            msg = json.dumps(data, ensure_ascii=False) + "\n"
-            self.main_client.sendall(msg.encode("utf-8"))
-            if msg_type != "hand_tracking":
-                print(f"  [SEND] {msg_type} ({len(msg)} bytes)")
-        except Exception as e:
-            print(f"  [SEND:ERR] {msg_type}: {e}")
-            self.main_client = None
+        with self._send_lock:
+            if not self.main_client:
+                if msg_type not in ("hand_tracking",):
+                    print(f"  [SEND:DROP] {msg_type} — main_client 未连接")
+                return
+            try:
+                msg = json.dumps(data, ensure_ascii=False) + "\n"
+                self.main_client.sendall(msg.encode("utf-8"))
+                if msg_type != "hand_tracking":
+                    print(f"  [SEND] {msg_type} ({len(msg)} bytes)")
+            except Exception as e:
+                print(f"  [SEND:ERR] {msg_type}: {e}")
+                self.main_client = None
 
     def _send_hand(self, data: dict):
         if self.hand_client:
@@ -548,7 +552,6 @@ class IntegratedServer:
 
     def _make_fake_landmarks(self, gesture: str):
         """TCP 手势模拟 → Fake Landmarks"""
-        from test_integrated import FakeLandmark  # reuse demo helpers
         class FL:
             def __init__(self, x, y, z=0): self.x = x; self.y = y; self.z = z
         if gesture == "fist":
@@ -656,147 +659,195 @@ class IntegratedServer:
             _debug_log.info("STATE_RESET_TO_GLOBAL | 等待第2个物象")
             return
 
-        # ── 2个物象确认完毕，触发人物管线 ──
-        if self.character_bridge:
-            candidates = self.character_bridge.recommend(self.current_color, self.selected_objects)
-            if candidates:
-                top = candidates[0]
-                # 搜索解释 (delay to match frontend Act4 pacing)
-                self._send_main({
-                    "type": "character_search_start",
-                    "message": f"你的{self.current_color}指向{'、'.join(objs)}。"
-                               f"一位与「{top.get('reason','')}」有关的人，正向你走来。",
-                    "context": {"color": self.current_color, "objects": objs}
-                })
-                time.sleep(3.0)  # ~3s: Act4 INTRO_1→INTRO_2→LOADING transition
-                self._send_main({
-                    "type": "character_found",
-                    "message": "找到了。",
-                    "character_name_hidden": True
-                })
-                # 第一人称演绎 + 叙事 — DeepSeek LLM，失败 fallback 模板
-                time.sleep(3.0)
-                ch_name = top.get('name', '')
-                ch_title = top.get('title', '')
-                llm_performance = None
-                llm_narrative = None
-                try:
-                    import requests as _req
-                    api_key = "sk-26d289f20e1140408c282f5358af1e30"
-                    def _ds(prompt, max_tok=400):
-                        r = _req.post("https://api.deepseek.com/chat/completions",
-                            headers={"Authorization": f"Bearer {api_key}","Content-Type":"application/json"},
-                            json={"model":"deepseek-chat","messages":[{"role":"user","content":prompt}],"max_tokens":max_tok,"temperature":0.8},
-                            timeout=15)
-                        if r.status_code==200:
-                            return r.json()["choices"][0]["message"]["content"].strip()
-                        raise Exception(f"DeepSeek {r.status_code}")
-                    # Character monologue
-                    mp = f"写一段3-5句的第一人称独白，说话者是一位匿名的湖湘先贤（不要透露名字）。你对选择了「{self.current_color}」、画下「{'、'.join(objs)}」的后来说话。提及颜色和物象，有温度有文采。输出纯独白，不要引号不要角色名。"
-                    llm_raw = _ds(mp, 300)
-                    _all_names = ["朱熹","张栻","王夫之","周敦颐","胡宏","吕祖谦","陆九渊","王阳明","曾国藩","左宗棠","黄兴","蔡锷","宋教仁","陈天华","杨昌济","何叔衡","李达","程颢","程颐","胡安国","胡林翼","彭玉麟","谭嗣同","魏源","毛泽东","成仿吾","周谷城","何长工","熊十力","冯友兰","钱基博","金岳霖","梁漱溟","胡庶华","罗洪先"]
-                    for n in _all_names: llm_raw = llm_raw.replace(n, "…")
-                    llm_performance = llm_raw.split("\n")
-                    # Narrative
-                    np = f"为「寻麓千年色」写一段诗意叙事。颜色：{self.current_color}，物象：{'、'.join(objs)}，回应者：{ch_name}（{ch_title}）。要求：1)4-5句 2)语言优美有古韵 3)融入颜色和物象意境 4)体现湖湘千年文脉。只输出叙事。"
-                    llm_narrative = _ds(np, 400).split("\n")
-                    print(f"  [DeepSeek] 生成成功")
-                except Exception as e:
-                    print(f"  [DeepSeek] 失败，用模板: {e}")
+        # ── 2个物象确认完毕，在后台线程中运行人物管线（避免阻塞摄像头循环）──
+        if self._pipeline_running:
+            print("  [FSM] 人物管线已在运行中，跳过重复触发")
+            return
+        self._pipeline_running = True
+        # 快照当前状态，防止主线程修改导致不一致
+        snapshot = {
+            "color": self.current_color,
+            "objects": list(self.selected_objects),
+        }
+        thread = threading.Thread(
+            target=self._run_character_pipeline,
+            args=(snapshot,),
+            daemon=True,
+            name="CharacterPipeline"
+        )
+        thread.start()
 
-                # character_performance
-                perf = llm_performance if llm_performance else [
-                    f"你选择了{self.current_color}。",
-                    f"你画下了{'、'.join(objs)}。",
-                    "后来者，千年文脉在此刻与你相遇。"
-                ]
-                self._send_main({
-                    "type": "character_performance",
-                    "character": "????",
-                    "paragraphs": perf
-                })
-                # 揭示人物 — 附带肖像URL
-                time.sleep(3.0)
-                portrait_map = {
-                    "胡宏":"huhong","李达":"lida","陆九渊":"lujiuyuan","王夫之":"wangfuzhi",
-                    "杨昌济":"yangchnagji","张栻":"zhangshi","周敦颐":"zhoudunyi","朱熹":"zhuxi",
-                    "黄兴":"huangxing","蔡锷":"caie","曾国藩":"zenguofan","左宗棠":"zuozongtang",
-                    "王阳明":"wangyangming","吕祖谦":"lvzuqian","宋教仁":"songjiaoreng",
-                    "陈天华":"chengtianhua","何叔衡":"heshuheng",
-                }
-                pf = portrait_map.get(ch_name, "")
-                self._send_main({
-                    "type": "character_revealed",
-                    "name": ch_name,
-                    "title": ch_title,
-                    "portrait": pf,
-                    "monologue": perf,
-                    "message": f"刚才与你说话的，是{ch_name}。"
-                })
-                # 叙事生成
-                time.sleep(3.0)
-                narrative_text = llm_narrative if llm_narrative else [
-                    f"{self.current_color}已经展开。",
-                    f"{'、'.join(objs)}也已经落下。",
-                    f"{ch_name}的声音回荡在千年书院中。",
-                    "这就是你寻到的千年色。"
-                ]
-                gen_result = {
-                    "type": "generation_result",
-                    "title": "你寻到的千年色",
-                    "paragraphs": narrative_text,
-                    "context": {"color": self.current_color, "objects": objs, "character": ch_name}
-                }
-                self._send_main(gen_result)
+    def _run_character_pipeline(self, snapshot: dict):
+        """后台线程：人物推荐 → LLM 独白/叙事 → 明信片生成 → 状态重置"""
+        color = snapshot["color"]
+        objs = snapshot["objects"]
 
-                # 直接用真实数据生成明信片
-                try:
-                    import random as _random
-                    from rag.uploader import PostcardUploader
-                    from PIL import Image, ImageDraw, ImageFont
+        try:
+            if not self.character_bridge:
+                self._pipeline_running = False
+                return
 
-                    all_palette = {"岳麓绿":"#496b4a","书院红":"#8d3d36","湘江蓝":"#3f7082","西迁黄":"#a9823e","校徽金":"#c3a45e","墨色":"#333936","梨黄":"#F0E440","桂黄":"#F2E700","澄蓝":"#355BFF"}
-                    c1_hex = all_palette.get(self.current_color, "#496b4a")
-                    others = [h for n,h in all_palette.items() if n != self.current_color]
-                    c2_hex = others[_random.randint(0,len(others)-1)] if others else "#8d3d36"
-                    font_lg = font_md = font_sm = None
-                    for fp in [r"C:\Windows\Fonts\simhei.ttf",r"C:\Windows\Fonts\msyh.ttc",r"C:\Windows\Fonts\simsun.ttc"]:
-                        if os.path.exists(fp):
-                            try: font_lg=ImageFont.truetype(fp,64); font_md=ImageFont.truetype(fp,38); font_sm=ImageFont.truetype(fp,24); break
-                            except: pass
-                    if font_lg is None: font_lg=font_md=font_sm=ImageFont.load_default()
-                    W,H=1200,1600; M=60
-                    card=Image.new("RGB",(W,H),(252,250,246))
-                    draw=ImageDraw.Draw(card)
-                    bw=(W-3*M)//2
-                    draw.rectangle([M,M,M+bw,M+280],fill=c1_hex)
-                    draw.rectangle([M*2+bw,M,M*2+bw*2,M+280],fill=c2_hex)
-                    draw.text((M+16,M+296),self.current_color,font=font_sm,fill=(100,90,80))
-                    # Objects
-                    draw.text((M,M+380),"你筑下的景",font=font_sm,fill=(140,130,120))
-                    draw.text((M,M+420),"、".join(objs),font=font_lg,fill=(45,38,30))
-                    # Character
-                    draw.text((M,M+540),"回应你的人",font=font_sm,fill=(140,130,120))
-                    draw.text((M,M+580),f"{top.get('name','')}　{top.get('title','')}",font=font_md,fill=(65,55,45))
-                    y=M+680
-                    for p in gen_result["paragraphs"][:3]:
-                        draw.text((M,y),p,font=font_sm,fill=(85,75,65)); y+=50
-                    draw.line([M,y+20,W-M,y+20],fill=(190,182,175),width=1)
-                    draw.text((M,y+38),f"湖南大学 · 寻麓千年色 · {datetime.now().strftime('%Y.%m.%d %H:%M')}",font=font_sm,fill=(150,145,140))
-                    uploader=PostcardUploader()
-                    result=uploader.upload(card)
-                    self._send_main({"type":"postcard_result","image_url":result["image_url"],"qr_base64":result["qr_base64"],"unique_id":result["unique_id"],"message":"扫码带走你的千年色。"})
-                    print(f"  [Postcard] 已上传: {result['image_url']}")
-                except Exception as e:
-                    print(f"  [Postcard] 失败: {e}")
+            candidates = self.character_bridge.recommend(color, objs)
+            if not candidates:
+                self._pipeline_running = False
+                return
 
+            top = candidates[0]
+            # ── 搜索阶段（Act4 转场 pacing）──
+            self._send_main({
+                "type": "character_search_start",
+                "message": f"你的{color}指向{'、'.join(objs)}。"
+                           f"一位与「{top.get('reason','')}」有关的人，正向你走来。",
+                "context": {"color": color, "objects": objs}
+            })
+            time.sleep(3.0)
+            self._send_main({
+                "type": "character_found",
+                "message": "找到了。",
+                "character_name_hidden": True
+            })
+            time.sleep(3.0)
+
+            # ── LLM 独白 + 叙事（DeepSeek，失败 fallback 模板）──
+            ch_name = top.get('name', '')
+            ch_title = top.get('title', '')
+            llm_performance = None
+            llm_narrative = None
+            try:
+                import requests as _req
+                def _ds(prompt, max_tok=400):
+                    r = _req.post(DEEPSEEK_BASE_URL,
+                        headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"},
+                        json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}],
+                              "max_tokens": max_tok, "temperature": 0.8},
+                        timeout=15)
+                    if r.status_code == 200:
+                        return r.json()["choices"][0]["message"]["content"].strip()
+                    raise Exception(f"DeepSeek {r.status_code}")
+                # 独白
+                mp = f"写一段3-5句的第一人称独白，说话者是一位匿名的湖湘先贤（不要透露名字）。你对选择了「{color}」、画下「{'、'.join(objs)}」的后来说话。提及颜色和物象，有温度有文采。输出纯独白，不要引号不要角色名。"
+                llm_raw = _ds(mp, 300)
+                _all_names = ["朱熹","张栻","王夫之","周敦颐","胡宏","吕祖谦","陆九渊","王阳明","曾国藩","左宗棠","黄兴","蔡锷","宋教仁","陈天华","杨昌济","何叔衡","李达","程颢","程颐","胡安国","胡林翼","彭玉麟","谭嗣同","魏源","毛泽东","成仿吾","周谷城","何长工","熊十力","冯友兰","钱基博","金岳霖","梁漱溟","胡庶华","罗洪先"]
+                for n in _all_names:
+                    llm_raw = llm_raw.replace(n, "…")
+                llm_performance = llm_raw.split("\n")
+                # 叙事
+                nprompt = f"为「寻麓千年色」写一段诗意叙事。颜色：{color}，物象：{'、'.join(objs)}，回应者：{ch_name}（{ch_title}）。要求：1)4-5句 2)语言优美有古韵 3)融入颜色和物象意境 4)体现湖湘千年文脉。只输出叙事。"
+                llm_narrative = _ds(nprompt, 400).split("\n")
+                print(f"  [DeepSeek] 生成成功")
+            except Exception as e:
+                print(f"  [DeepSeek] 失败，用模板: {e}")
+
+            # ── 角色演绎 ──
+            perf = llm_performance if llm_performance else [
+                f"你选择了{color}。",
+                f"你画下了{'、'.join(objs)}。",
+                "后来者，千年文脉在此刻与你相遇。"
+            ]
+            self._send_main({
+                "type": "character_performance",
+                "character": "????",
+                "paragraphs": perf
+            })
+            time.sleep(3.0)
+
+            # ── 人物揭示 ──
+            portrait_map = {
+                "胡宏":"huhong","李达":"lida","陆九渊":"lujiuyuan","王夫之":"wangfuzhi",
+                "杨昌济":"yangchnagji","张栻":"zhangshi","周敦颐":"zhoudunyi","朱熹":"zhuxi",
+                "黄兴":"huangxing","蔡锷":"caie","曾国藩":"zenguofan","左宗棠":"zuozongtang",
+                "王阳明":"wangyangming","吕祖谦":"lvzuqian","宋教仁":"songjiaoreng",
+                "陈天华":"chengtianhua","何叔衡":"heshuheng",
+            }
+            pf = portrait_map.get(ch_name, "")
+            self._send_main({
+                "type": "character_revealed",
+                "name": ch_name,
+                "title": ch_title,
+                "portrait": pf,
+                "monologue": perf,
+                "message": f"刚才与你说话的，是{ch_name}。"
+            })
+            time.sleep(3.0)
+
+            # ── 叙事生成 ──
+            narrative_text = llm_narrative if llm_narrative else [
+                f"{color}已经展开。",
+                f"{'、'.join(objs)}也已经落下。",
+                f"{ch_name}的声音回荡在千年书院中。",
+                "这就是你寻到的千年色。"
+            ]
+            gen_result = {
+                "type": "generation_result",
+                "title": "你寻到的千年色",
+                "paragraphs": narrative_text,
+                "context": {"color": color, "objects": objs, "character": ch_name}
+            }
+            self._send_main(gen_result)
+
+            # ── 明信片生成 ──
+            try:
+                import random as _random
+                from rag.uploader import PostcardUploader
+                from PIL import Image, ImageDraw, ImageFont
+
+                all_palette = {"岳麓绿":"#496b4a","书院红":"#8d3d36","湘江蓝":"#3f7082","西迁黄":"#a9823e","校徽金":"#c3a45e","墨色":"#333936","梨黄":"#F0E440","桂黄":"#F2E700","澄蓝":"#355BFF"}
+                c1_hex = all_palette.get(color, "#496b4a")
+                others = [h for n, h in all_palette.items() if n != color]
+                c2_hex = others[_random.randint(0, len(others)-1)] if others else "#8d3d36"
+                font_lg = font_md = font_sm = None
+                for fp in [r"C:\Windows\Fonts\simhei.ttf", r"C:\Windows\Fonts\msyh.ttc", r"C:\Windows\Fonts\simsun.ttc"]:
+                    if os.path.exists(fp):
+                        try:
+                            font_lg = ImageFont.truetype(fp, 64)
+                            font_md = ImageFont.truetype(fp, 38)
+                            font_sm = ImageFont.truetype(fp, 24)
+                            break
+                        except Exception:
+                            pass
+                if font_lg is None:
+                    font_lg = font_md = font_sm = ImageFont.load_default()
+                W, H = 1200, 1600
+                M = 60
+                card = Image.new("RGB", (W, H), (252, 250, 246))
+                draw = ImageDraw.Draw(card)
+                bw = (W - 3 * M) // 2
+                draw.rectangle([M, M, M + bw, M + 280], fill=c1_hex)
+                draw.rectangle([M * 2 + bw, M, M * 2 + bw * 2, M + 280], fill=c2_hex)
+                draw.text((M + 16, M + 296), color, font=font_sm, fill=(100, 90, 80))
+                draw.text((M, M + 380), "你筑下的景", font=font_sm, fill=(140, 130, 120))
+                draw.text((M, M + 420), "、".join(objs), font=font_lg, fill=(45, 38, 30))
+                draw.text((M, M + 540), "回应你的人", font=font_sm, fill=(140, 130, 120))
+                draw.text((M, M + 580), f"{top.get('name','')}　{top.get('title','')}", font=font_md, fill=(65, 55, 45))
+                y = M + 680
+                for p in gen_result["paragraphs"][:3]:
+                    draw.text((M, y), p, font=font_sm, fill=(85, 75, 65))
+                    y += 50
+                draw.line([M, y + 20, W - M, y + 20], fill=(190, 182, 175), width=1)
+                draw.text((M, y + 38), f"湖南大学 · 寻麓千年色 · {datetime.now().strftime('%Y.%m.%d %H:%M')}", font=font_sm, fill=(150, 145, 140))
+                uploader = PostcardUploader()
+                result = uploader.upload(card)
+                self._send_main({"type": "postcard_result", "image_url": result["image_url"],
+                                 "qr_base64": result["qr_base64"], "unique_id": result["unique_id"],
+                                 "message": "扫码带走你的千年色。"})
+                print(f"  [Postcard] 已上传: {result['image_url']}")
+            except Exception as e:
+                print(f"  [Postcard] 失败: {e}")
+
+            # ── 等待 20s 后自动重置 ──
             time.sleep(20.0)
+
+        except Exception as e:
+            logger.error(f"Character pipeline 异常: {e}")
+        finally:
+            # ── 状态重置 ──
             self.selected_objects.clear()
             self.sketch_trajectories.clear()
             self._pending_trajectory = []
             self.fsm._recognized_object = None
             self.fsm.reset_to_global()
             self.fsm.trigger_color_extraction_start()
+            self._pipeline_running = False
             _debug_log.info("STATE_RESET | 一轮完整流程结束，重置回 COLOR_EXTRACTION")
 
     def _on_character_confirmed(self):
@@ -814,6 +865,7 @@ class IntegratedServer:
 
     def _on_color_extraction_start(self):
         """颜色提取开始"""
+        self._color_done = False  # 新一 round 择色，重置绘画就绪标记
         print("  [FSM] 颜色提取开始")
         self._send_main({
             "type": "color_extraction_start",
@@ -942,6 +994,7 @@ class IntegratedServer:
     def _on_color_confirmed(self):
         """颜色确认"""
         color = self.current_color or "岳麓绿"
+        self._color_done = True  # 允许自动绘画
         _debug_log.info(f"COLOR_CONFIRMED | color={color} | fsm_mode={self.fsm.mode.value}")
         print(f"  [FSM] 颜色已确认: {color}")
         self._send_main({
@@ -993,7 +1046,7 @@ class IntegratedServer:
                 self.fsm.process(hand_lm, ts)
 
                 # 每15帧发送手势状态，确保前端同步
-                if self.main_client and self.frame_count % 5 == 0:
+                if self.main_client and self.frame_count % 3 == 0:
                     self._send_gesture_state()
 
                 # ── 帧级调试日志（每30帧写一次，避免刷盘）──
@@ -1014,22 +1067,37 @@ class IntegratedServer:
 
                 # → 前端 手部数据（从已检测结果直接计算像素坐标）
                 pixel_landmarks = [(int(lm.x * w), int(lm.y * h)) for lm in hand_lm]
-                palm_x = sum(p[0] for p in pixel_landmarks) // 21
-                palm_y = sum(p[1] for p in pixel_landmarks) // 21
-                wrist = pixel_landmarks[0]
-                fingertips = [pixel_landmarks[i] for i in (4, 8, 12, 16, 20)]
+
+                # ── 透视标定：将相机坐标映射到投影/屏幕坐标 ──
+                if self.hand_tracker.is_calibrated and self.hand_tracker.transform_matrix is not None:
+                    pts = np.array(pixel_landmarks, dtype=np.float32).reshape(-1, 1, 2)
+                    transformed = cv2.perspectiveTransform(pts, self.hand_tracker.transform_matrix)
+                    calib_landmarks = [(int(p[0][0]), int(p[0][1])) for p in transformed]
+                    calib_fingertips = [calib_landmarks[i] for i in (4, 8, 12, 16, 20)]
+                else:
+                    # 未标定：缩放到输出尺寸
+                    calib_landmarks = [(int(x * self.hand_tracker.output_size[0] / w),
+                                       int(y * self.hand_tracker.output_size[1] / h))
+                                      for (x, y) in pixel_landmarks]
+                    calib_fingertips = [calib_landmarks[i] for i in (4, 8, 12, 16, 20)]
+
+                palm_x = sum(p[0] for p in calib_landmarks) // 21
+                palm_y = sum(p[1] for p in calib_landmarks) // 21
+                wrist = calib_landmarks[0]
+                fingertips = calib_fingertips
 
                 if self.hand_client:
+                    ow, oh = self.hand_tracker.output_size
                     lm_flat = []
-                    for x, y in pixel_landmarks:
-                        lm_flat.extend([x, y])
+                    for x, y in calib_landmarks:
+                        lm_flat.extend([x / max(ow, 1), y / max(oh, 1)])
                     ft_flat = []
-                    for x, y in fingertips:
-                        ft_flat.extend([x, y])
+                    for x, y in calib_fingertips:
+                        ft_flat.extend([x / max(ow, 1), y / max(oh, 1)])
                     self._send_hand({
                         "type": "hand_tracking",
-                        "palm_center": [palm_x, palm_y],
-                        "wrist": wrist,
+                        "palm_center": [palm_x / max(ow, 1), palm_y / max(oh, 1)],
+                        "wrist": [wrist[0] / max(ow, 1), wrist[1] / max(oh, 1)],
                         "landmarks": lm_flat,
                         "fingertips": ft_flat,
                     })
@@ -1037,9 +1105,10 @@ class IntegratedServer:
                 # ── Cover Flow: 手首次出现在识别区 ──
                 if not self._prev_hand_detected and not self._hand_appeared_sent:
                     gesture_name = self.fsm.current_gesture.value if self.fsm.current_gesture else "open_hand"
+                    ow, oh = self.hand_tracker.output_size
                     self._send_main({
                         "type": "hand_appeared",
-                        "palm_center": [palm_x, palm_y],
+                        "palm_center": [palm_x / max(ow, 1), palm_y / max(oh, 1)],
                         "gesture": gesture_name,
                     })
                     self._hand_appeared_sent = True
@@ -1047,15 +1116,20 @@ class IntegratedServer:
 
                 self._prev_hand_detected = True
 
-                # ── drawing_point: GLOBAL模式手出现即画，不需特定手势 ──
-                if self.main_client:
-                    if self.fsm.mode.value == "GLOBAL" and not self.fsm.is_drawing:
-                        self.fsm._transition_to(GestureMode.DRAWING, "TRACKING")
+                # ── 颜色确认后手出现即画（只在非择色模式下）──
+                _drawing_modes = {GestureMode.GLOBAL, GestureMode.DRAWING, GestureMode.CANDIDATE}
+                if self.main_client and self._color_done and self.fsm.mode in _drawing_modes:
+                    if not self.fsm.is_drawing:
+                        # 直接设置 mode + sub_state，不用 _transition_to
+                        self.fsm.mode = GestureMode.DRAWING
                         self.fsm.drawing_sub = DrawingSubState.TRACKING
                         self._send_main({"type": "drawing_start", "message": "开始绘画"})
-                    if self.fsm.is_drawing:
-                        index_tip = fingertips[1]
-                        self._send_main({"type": "drawing_point", "x": index_tip[0], "y": index_tip[1]})
+                    index_tip = fingertips[1]
+                    # 归一化到 0-1（相对于 output_size），前端自行缩放到画布
+                    ow, oh = self.hand_tracker.output_size
+                    self._send_main({"type": "drawing_point",
+                                     "x": index_tip[0] / max(ow, 1),
+                                     "y": index_tip[1] / max(oh, 1)})
                 self._hand_lost_frames = 0
 
                 # ── 可视化（仅在非 --no-display 模式） ──

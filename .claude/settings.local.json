@@ -62,7 +62,10 @@
       "Bash(dir /b /od \"D:\\\\projects\\\\ohhh\\\\camera_debug.log\" \"D:\\\\projects\\\\ohhh\\\\backend.log\" \"D:\\\\projects\\\\ohhh\\\\ws_server.log\")",
       "Bash(powershell -Command \"Get-Process -Id 40444,29388,6140 -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, CPU, WorkingSet64 | Format-Table -AutoSize\")",
       "Bash(powershell *)",
-      "Bash(npx tailwindcss *)"
+      "Bash(npx tailwindcss *)",
+      "Bash(git reset *)",
+      "Bash(git commit *、)",
+      "Bash(git commit *)"
     ]
   }
 }

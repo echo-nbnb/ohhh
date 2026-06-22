@@ -372,9 +372,10 @@ export default function App() {
         break;
 
       case MESSAGE_TYPES.DRAWING_POINT:
-        // Direct canvas rendering — bypass React state entirely for performance
-        remoteDrawRef.current?.(message.x, message.y);
-        // Still accumulate positions for bbox calculation (cheap, no render)
+        // Coordinates are normalized (0-1), scale to viewport for canvas rendering
+        const vw = window.innerWidth, vh = window.innerHeight;
+        remoteDrawRef.current?.(message.x * vw, message.y * vh);
+        // Accumulate normalized positions for bbox calculation
         drawPositionsRef.current.push({ x: message.x, y: message.y });
         break;
 
@@ -395,7 +396,8 @@ export default function App() {
           const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
           const minX = Math.min(...xs), maxX = Math.max(...xs);
           const minY = Math.min(...ys), maxY = Math.max(...ys);
-          position = { left: (minX + maxX) / 2 / 1280 * 100, top: (minY + maxY) / 2 / 720 * 100, width: Math.max((maxX - minX) / 1280 * 100, 10) };
+          // 坐标已归一化到 0-1，直接转百分比
+          position = { left: (minX + maxX) / 2 * 100, top: (minY + maxY) / 2 * 100, width: Math.max((maxX - minX) * 100, 10) };
         }
         drawPositionsRef.current = []; // reset for next drawing
         remoteDrawRef.current?.clear?.(); // clear remote canvas for next drawing

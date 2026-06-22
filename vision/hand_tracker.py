@@ -50,6 +50,7 @@ class HandTracker:
 
         # 透视变换
         self.transform_matrix = None
+        self.inverse_transform_matrix = None
         self.calibration_points = []      # 摄像头画面中四点 [(x,y),...]
         self.calibration_collecting = False
         self.calibration_order = ["左上", "右上", "右下", "左下"]
@@ -104,6 +105,7 @@ class HandTracker:
         """重置标定"""
         self.calibration_points = []
         self.transform_matrix = None
+        self.inverse_transform_matrix = None
         self.calibration_collecting = True
         print("[标定] 已重置，请重新选点")
 
@@ -121,6 +123,8 @@ class HandTracker:
         ], dtype=np.float32)
 
         self.transform_matrix = cv2.getPerspectiveTransform(src, dst)
+        # 预计算逆变换（投影坐标 → 相机坐标），用于网格叠加
+        self.inverse_transform_matrix = cv2.getPerspectiveTransform(dst, src)
         print(f"[标定] 透视变换矩阵已计算")
         print(f"  源点: {self.calibration_points}")
         print(f"  目标分辨率: {self.output_size}")
@@ -150,6 +154,12 @@ class HandTracker:
                 self.output_size = tuple(data.get("output_size", [1920, 1080]))
                 if mat:
                     self.transform_matrix = np.array(mat, dtype=np.float32)
+                    # 重建逆变换矩阵
+                    src = np.array(pts, dtype=np.float32)
+                    dst = np.array([[0, 0], [self.output_size[0], 0],
+                                    [self.output_size[0], self.output_size[1]],
+                                    [0, self.output_size[1]]], dtype=np.float32)
+                    self.inverse_transform_matrix = cv2.getPerspectiveTransform(dst, src)
                 else:
                     self._compute_transform()
                 print(f"[标定] 已从文件加载 ({CALIB_FILE})")
@@ -173,20 +183,19 @@ class HandTracker:
                        (px + 20, py - 10),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-        # 如果已标定，绘制映射网格
-        if self.is_calibrated:
+        # 如果已标定，绘制映射网格（使用预计算的逆变换矩阵）
+        if self.is_calibrated and self.inverse_transform_matrix is not None:
             grid_size = 100
+            # 预生成所有网格点的投影坐标
+            grid_pts = []
             for gx in range(0, self.output_size[0] + 1, grid_size):
                 for gy in range(0, self.output_size[1] + 1, grid_size):
-                    pt = np.array([[[gx, gy]]], dtype=np.float32)
-                    inv = cv2.getPerspectiveTransform(
-                        np.array([[0, 0], [self.output_size[0], 0],
-                                  [self.output_size[0], self.output_size[1]],
-                                  [0, self.output_size[1]]], dtype=np.float32),
-                        self.transform_matrix
-                    )
-                    mapped = cv2.perspectiveTransform(pt, inv)
-                    mx, my = int(mapped[0][0][0]), int(mapped[0][0][1])
+                    grid_pts.append([gx, gy])
+            if grid_pts:
+                pts = np.array(grid_pts, dtype=np.float32).reshape(-1, 1, 2)
+                mapped = cv2.perspectiveTransform(pts, self.inverse_transform_matrix)
+                for pt in mapped:
+                    mx, my = int(pt[0][0]), int(pt[0][1])
                     if 0 <= mx < w and 0 <= my < h:
                         cv2.circle(display, (mx, my), 2, (0, 255, 255), -1)
 

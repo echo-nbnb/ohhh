@@ -84,13 +84,11 @@ export function normalizeBackendMessage(payload) {
         if (Array.isArray(tip) && tip.length >= 2) return { type: MESSAGE_TYPES.DRAWING_POINT, x: tip[0], y: tip[1] };
         if (tip && typeof tip === "object") return { type: MESSAGE_TYPES.DRAWING_POINT, x: tip.x ?? tip[0] ?? 0, y: tip.y ?? tip[1] ?? 0 };
       }
-      // Fallback: 从 landmarks (MediaPipe 21点) 取食指指尖 index=8
+      // Fallback: 从 landmarks (平铺数组 [x0,y0,...,x20,y20]) 取食指指尖 index=8
       const lm = payload.landmarks;
-      if (Array.isArray(lm) && lm.length >= 9) {
-        const tip = lm[8];
-        if (tip && typeof tip === "object") {
-          return { type: MESSAGE_TYPES.DRAWING_POINT, x: Math.round((tip.x ?? 0.5) * 1280), y: Math.round((tip.y ?? 0.5) * 720) };
-        }
+      if (Array.isArray(lm) && lm.length >= 18) {
+        // 坐标已归一化 0-1，直接透传
+        return { type: MESSAGE_TYPES.DRAWING_POINT, x: lm[16], y: lm[17] };
       }
       return null;
     }
