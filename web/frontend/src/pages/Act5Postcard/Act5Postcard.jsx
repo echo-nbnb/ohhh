@@ -56,6 +56,9 @@ export default function Act5Postcard({ postcardData = MOCK_DATA, debugStage, aut
   useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
   useEffect(() => { completeDelayRef.current = completeDelay; }, [completeDelay]);
 
+  // Sync postcardData into internal data state on each update
+  useEffect(() => { setData(postcardData); }, [postcardData]);
+
   useEffect(() => { if (debugStage !== undefined) setStage(debugStage); }, [debugStage]);
   useEffect(() => { let m = true; if (onFetchPostcardData) onFetchPostcardData().then(r => { if (m && r) setData(p => ({ ...p, ...r })); }); return () => { m = false; }; }, [onFetchPostcardData]);
 
@@ -87,8 +90,26 @@ export default function Act5Postcard({ postcardData = MOCK_DATA, debugStage, aut
       {showTitleBg && <img className="act5__titleBg" src={titleBgUrl} alt="" draggable="false" />}
       {showTopTitle && (<div className="act5__postcardTitle"><div className="act5__postcardTitleCn">{data.title?.cn}</div><div className="act5__postcardTitleEn">{(data.title?.en || "").split("\n").map((l, i) => <div key={`te-${i}`}>{l}</div>)}</div></div>)}
       {showTrace && <div className="act5__traceText">{data.traceText}</div>}
-      {showBridge && <img className="act5__imagery act5__imagery--bridge" src={data.imageryItems?.[0]?.imageUrl || mockBridgeUrl} alt="桥" draggable="false" />}
-      {showTree && <img className="act5__imagery act5__imagery--tree" src={data.imageryItems?.[1]?.imageUrl || mockTreeUrl} alt="树" draggable="false" />}
+      {showBridge && data.imageryItems?.[0] && (
+        <img className="act5__imagery" src={data.imageryItems[0].imageUrl || mockBridgeUrl} alt={data.imageryItems[0].name || "物象1"} draggable="false"
+          style={data.imageryItems[0].position ? {
+            left: `${data.imageryItems[0].position.left}%`,
+            top: `${data.imageryItems[0].position.top}%`,
+            width: `${data.imageryItems[0].position.width}%`,
+            transform: "translate(-50%, -50%)",
+          } : undefined}
+        />
+      )}
+      {showTree && data.imageryItems?.[1] && (
+        <img className="act5__imagery" src={data.imageryItems[1].imageUrl || mockTreeUrl} alt={data.imageryItems[1].name || "物象2"} draggable="false"
+          style={data.imageryItems[1].position ? {
+            left: `${data.imageryItems[1].position.left}%`,
+            top: `${data.imageryItems[1].position.top}%`,
+            width: `${data.imageryItems[1].position.width}%`,
+            transform: "translate(-50%, -50%)",
+          } : undefined}
+        />
+      )}
       {showDisks && (<><div className="act5__colorDiskWrap"><div className="act5__liquidDisk"><DualColorLiquidChrome colorA={primaryColor} colorB={secondaryColor} /></div><img className="act5__colorDiskFrame" src={colorDiskUrl} alt="" draggable="false" /><img className="act5__colorDiskOrbit" src={colorDiskOrbitUrl} alt="" draggable="false" /></div><div className="act5__personDiskWrap"><div className="act5__personInner"><img className="act5__personPortrait" src={data.person?.portraitUrl || mockPersonUrl} alt={data.person?.name || "人物"} draggable="false" /></div><img className="act5__personDisk" src={personDiskUrl} alt="" draggable="false" /></div></>)}
       {showObjectText && (<div className="act5__objectText">{(data.objectText || []).map((l, i) => <div key={`ot-${i}`}>{l}</div>)}</div>)}
       {showAiText && (<div className="act5__aiWriting">{(data.aiWriting || []).map((l, i) => <div key={`aw-${i}`}>{l}</div>)}</div>)}

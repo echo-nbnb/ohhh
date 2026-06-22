@@ -56,6 +56,7 @@ export default function Act4SpiritCalling({
   onFetchSpiritMatch,
   onComplete,
   completeDelay = 4000,
+  waitingForStamp = false,
 }) {
   const [stage, setStage] = useState(STAGE.INTRO_1);
   const [matchData, setMatchData] = useState(null);
@@ -129,6 +130,12 @@ export default function Act4SpiritCalling({
       <div className="act4__icons" aria-hidden="true">
         {floatingIcons.map((item) => (<img key={item.id} className="act4__icon" src={iconUrl} alt="" draggable="false" style={{ left: `${item.x}%`, top: `${item.y}%`, width: `${item.size}px`, height: `${item.size}px`, opacity: item.opacity, transform: `rotate(${item.rotate}deg)`, "--duration": `${item.duration}s`, "--delay": `${item.delay}s`, "--drift-x": `${item.driftX}px`, "--drift-y": `${item.driftY}px` }} />))}
       </div>
+      {waitingForStamp && (
+        <div className="act4__stampPrompt">
+          <div className="act4__stampText">握拳盖章</div>
+          <div className="act4__stampSub">完成你的千年色</div>
+        </div>
+      )}
     </section>
   );
 }

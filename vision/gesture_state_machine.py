@@ -133,6 +133,9 @@ class GestureStateMachine:
         self._gesture_votes: dict = {}  # {GestureType: count}
         self._confirmed_gesture: GestureType = GestureType.NONE
 
+        # 状态转移冷却: 转移后 N 帧内忽略手势变化，防止一次握拳触发多轮循环
+        self._cooldown_remaining: int = 0
+
         # 回调
         self.on_mode_change: Optional[Callable[[str, str, str], None]] = None
         self.on_color_extraction_start: Optional[Callable] = None
@@ -201,8 +204,14 @@ class GestureStateMachine:
         self.palm_position = (palm.x if hasattr(palm, 'x') else palm[0],
                               palm.y if hasattr(palm, 'y') else palm[1])
 
-        # 检测手势变化
+        # 冷却期递减
+        if self._cooldown_remaining > 0:
+            self._cooldown_remaining -= 1
+
+        # 检测手势变化（冷却期内强制忽略）
         gesture_changed = (self.current_gesture != self.prev_gesture)
+        if self._cooldown_remaining > 0:
+            gesture_changed = False
 
         # 更新静止计时器
         dx = abs(self.palm_position[0] - self.prev_palm_x)
@@ -372,6 +381,9 @@ class GestureStateMachine:
         old_mode = self.mode.value
         self.mode = mode
         self._still_start = 0.0
+        # Cooldown: prevent same gesture from immediately re-triggering another transition
+        self._cooldown_remaining = 10
+        self._gesture_votes.clear()
         self._notify_mode_change(sub_state)
         logger.info(f"GestureFSM: {old_mode} → {mode.value} ({sub_state})")
 

@@ -80,15 +80,11 @@ export default function Act2ColorSeeking({
     return () => window.clearInterval(timer);
   }, [autoDemo, controlledStep, stepDuration]);
 
-  // Fire onComplete when step 4 is reached (both autoDemo and external control)
+  // Fire onComplete when step 4 is reached
   const completeTimerRef = useRef(null);
   useEffect(() => {
     if (step === 4 && onComplete) {
-      console.log("[Act2] step=4 reached, scheduling onComplete in", completeDelay, "ms");
-      completeTimerRef.current = setTimeout(() => {
-        console.log("[Act2] onComplete firing");
-        onComplete();
-      }, completeDelay);
+      completeTimerRef.current = setTimeout(() => onComplete(), completeDelay);
     }
     return () => {
       if (completeTimerRef.current) clearTimeout(completeTimerRef.current);

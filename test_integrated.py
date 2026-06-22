@@ -109,7 +109,7 @@ class IntegratedServer:
         self.no_display = no_display
         self.no_camera = no_camera
         self.frame_count = 0
-        self.current_color = "岳麓绿"  # 默认第一幕颜色
+        self.current_color = "桂黄"  # 默认第一幕颜色
         self.selected_objects: List[str] = []
         self.sketch_trajectories: Dict[str, List] = {}  # {物象名: [(x,y,ts_ms), ...]}
         self._current_frame: Optional[np.ndarray] = None  # 最新帧，用于回调中检测
@@ -219,7 +219,7 @@ class IntegratedServer:
     def _init_gesture_fsm(self):
         print("[3] 初始化手势状态机...")
         from vision.gesture_state_machine import create_gesture_state_machine, GestureMode
-        self.fsm = create_gesture_state_machine(debounce_frames=1)
+        self.fsm = create_gesture_state_machine(debounce_frames=5)
 
         # 回调：模式切换 → 发送到前端
         self.fsm.on_mode_change = self._on_fsm_mode_change
@@ -583,15 +583,13 @@ class IntegratedServer:
         self._send_gesture_state()
 
     def _on_object_confirmed(self, name: str, score: float, qd_cat: str):
-        """物象确认 → 自动人物推荐 + 演绎 + 生成"""
-        print(f"  [FSM] 物象已确认: {name} ({score:.2f}) → 触发人物推荐")
+        """物象确认 → 第一轮回GLOBAL等第二轮，第二轮才触发人物推荐"""
+        print(f"  [FSM] 物象已确认: {name} ({score:.2f})")
         self.selected_objects.append(name)
-        # 保存轨迹
         if self._pending_trajectory:
             self.sketch_trajectories[name] = self._pending_trajectory
             self._pending_trajectory = []
 
-        # 1. 物象确认消息
         objs = list(self.selected_objects)
         self._send_main({
             "type": "object_confirmed",
@@ -599,29 +597,38 @@ class IntegratedServer:
             "objects_so_far": objs,
             "message": f"一个意象已经落下。" if len(objs) == 1
                        else f"又一个意象落下。{'、'.join(objs)}，它们在一起了。",
-            "can_continue": True
+            "can_continue": len(objs) >= 2
         })
 
-        # 2. 人物推荐 + 自动演绎 + 生成
+        # 只有确认了2个物象后才触发人物推荐管线
+        if len(objs) < 2:
+            print(f"  [FSM] 还需要第2个物象，回GLOBAL等待")
+            self.fsm._recognized_object = None
+            self._pending_trajectory = []
+            self.fsm.reset_to_global()
+            _debug_log.info("STATE_RESET_TO_GLOBAL | 等待第2个物象")
+            return
+
+        # ── 2个物象确认完毕，触发人物管线 ──
         if self.character_bridge:
             candidates = self.character_bridge.recommend(self.current_color, self.selected_objects)
             if candidates:
                 top = candidates[0]
-                # 搜索解释
+                # 搜索解释 (delay to match frontend Act4 pacing)
                 self._send_main({
                     "type": "character_search_start",
                     "message": f"你的{self.current_color}指向{'、'.join(objs)}。"
                                f"一位与「{top.get('reason','')}」有关的人，正向你走来。",
                     "context": {"color": self.current_color, "objects": objs}
                 })
-                time.sleep(0.1)
+                time.sleep(3.0)  # ~3s: Act4 INTRO_1→INTRO_2→LOADING transition
                 self._send_main({
                     "type": "character_found",
                     "message": "找到了。",
                     "character_name_hidden": True
                 })
-                # 第一人称演绎
-                time.sleep(0.1)
+                # 第一人称演绎 (delay for LOADING→FOUND transition)
+                time.sleep(3.0)
                 self._send_main({
                     "type": "character_performance",
                     "character": "????",
@@ -631,16 +638,16 @@ class IntegratedServer:
                         "后来者，千年文脉在此刻与你相遇。"
                     ]
                 })
-                # 揭示人物
-                time.sleep(0.1)
+                # 揭示人物 (delay for FRAME_EMPTY→BLUE_TEXT transition)
+                time.sleep(3.0)
                 self._send_main({
                     "type": "character_revealed",
                     "name": top.get("name", ""),
                     "title": top.get("title", ""),
                     "message": f"刚才与你说话的，是{top.get('name','')}。"
                 })
-                # 自动生成
-                time.sleep(0.1)
+                # 自动生成 (delay for YELLOW_TEXT→FINAL_REVEAL transition)
+                time.sleep(3.0)
                 gen_result = {
                     "type": "generation_result",
                     "title": "你寻到的千年色",
@@ -703,7 +710,8 @@ class IntegratedServer:
                 except Exception as e:
                     print(f"  [Postcard] 上传失败: {e}")
 
-            # ── 流程完成，重置状态准备下一轮 ──
+            # ── 流程完成，等待前端播完再重置 ──
+            time.sleep(20.0)  # give frontend Act4/5 time to animate (~70s total)
             self.selected_objects.clear()
             self.sketch_trajectories.clear()
             self._pending_trajectory = []
@@ -793,7 +801,7 @@ class IntegratedServer:
     def _on_clothing_fallback(self):
         """衣物兜底"""
         import random as _random
-        _fallback_colors = ["岳麓绿", "书院红", "西迁黄", "湘江蓝", "校徽金"]
+        _fallback_colors = ["朱红","灯橙","梨黄","叶绿","瓷青","海蓝","烟紫","枫红","暖橙","藤黄","玉绿","石青","澄蓝","影紫","桃红","夕橙","桂黄","茶绿","湖青","沧蓝","黛紫"]
         print("  [FSM] 触发衣物兜底")
         if self.webcam_color_detector is None:
             pick = _random.choice(_fallback_colors)
@@ -1025,7 +1033,7 @@ class IntegratedServer:
                 # 重置标定
                 self.hand_tracker.reset_calibration()
             elif ord('1') <= key <= ord('6'):
-                colors = ["岳麓绿", "书院红", "西迁黄", "湘江蓝", "校徽金", "墨色"]
+                colors = ["朱红","灯橙","梨黄","叶绿","瓷青","海蓝","烟紫","枫红","暖橙","藤黄","玉绿","石青","澄蓝","影紫","桃红","夕橙","桂黄","茶绿","湖青","沧蓝","黛紫"]
                 self.current_color = colors[key - ord('1')]
                 print(f"[颜色] 切换到: {self.current_color}")
 
@@ -1085,7 +1093,7 @@ class IntegratedServer:
                 gesture_name = "open_hand"
                 print(f"\n  → 张手")
             elif ord('1') <= key <= ord('6'):
-                colors = ["岳麓绿", "书院红", "西迁黄", "湘江蓝", "校徽金", "墨色"]
+                colors = ["朱红","灯橙","梨黄","叶绿","瓷青","海蓝","烟紫","枫红","暖橙","藤黄","玉绿","石青","澄蓝","影紫","桃红","夕橙","桂黄","茶绿","湖青","沧蓝","黛紫"]
                 self.current_color = colors[key - ord('1')]
                 print(f"\n[颜色] → {self.current_color}")
             elif key == ord('r') and self.fsm.mode.value == "CANDIDATE":

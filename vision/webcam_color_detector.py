@@ -25,35 +25,32 @@ logger = logging.getLogger("WebcamColorDetector")
 
 # 模型路径（相对于项目根目录）
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-POSE_MODEL = os.path.join(PROJECT_ROOT, 'pose_landmarker.task')
-SELFIE_MODEL = os.path.join(PROJECT_ROOT, 'selfie_segmenter.tflite')
+POSE_MODEL = os.path.join(PROJECT_ROOT, 'vision', 'pose_landmarker.task')
+SELFIE_MODEL = os.path.join(PROJECT_ROOT, 'vision', 'selfie_segmenter.tflite')
 
-# 六色HSV中心值
+# 21色HSV中心值（v2 三组）
 COLOR_HEX_VALUES = {
-    "岳麓绿": {
-        "hsv_center": (60, 120, 110),
-        "hsv_range": ((35, 40, 20), (85, 255, 200))
-    },
-    "书院红": {
-        "hsv_center": (8, 140, 110),
-        "hsv_range": ((0, 40, 20), (15, 255, 200))
-    },
-    "西迁黄": {
-        "hsv_center": (28, 160, 180),
-        "hsv_range": ((15, 40, 40), (40, 255, 255))
-    },
-    "湘江蓝": {
-        "hsv_center": (115, 130, 110),
-        "hsv_range": ((95, 40, 20), (135, 255, 200))
-    },
-    "校徽金": {
-        "hsv_center": (22, 180, 200),
-        "hsv_range": ((10, 60, 60), (35, 200, 255))
-    },
-    "墨色": {
-        "hsv_center": (0, 10, 30),
-        "hsv_range": ((0, 0, 0), (180, 50, 60))
-    }
+    "朱红": {"hsv_center": (0, 254, 221), "hsv_range": ((0, 80, 40), (8, 255, 255))},
+    "灯橙": {"hsv_center": (24, 255, 254), "hsv_range": ((14, 80, 40), (34, 255, 255))},
+    "梨黄": {"hsv_center": (56, 187, 240), "hsv_range": ((42, 60, 40), (70, 255, 255))},
+    "叶绿": {"hsv_center": (102, 210, 255), "hsv_range": ((85, 60, 40), (118, 255, 255))},
+    "瓷青": {"hsv_center": (177, 218, 255), "hsv_range": ((162, 60, 40), (192, 255, 255))},
+    "海蓝": {"hsv_center": (220, 224, 255), "hsv_range": ((205, 60, 40), (235, 255, 255))},
+    "烟紫": {"hsv_center": (269, 255, 255), "hsv_range": ((255, 60, 40), (15, 255, 255))},
+    "枫红": {"hsv_center": (0, 255, 196), "hsv_range": ((0, 80, 30), (8, 255, 255))},
+    "暖橙": {"hsv_center": (38, 205, 255), "hsv_range": ((28, 60, 40), (48, 255, 255))},
+    "藤黄": {"hsv_center": (53, 255, 246), "hsv_range": ((40, 60, 40), (66, 255, 255))},
+    "玉绿": {"hsv_center": (123, 255, 235), "hsv_range": ((108, 60, 40), (138, 255, 255))},
+    "石青": {"hsv_center": (160, 196, 253), "hsv_range": ((145, 50, 40), (175, 255, 255))},
+    "澄蓝": {"hsv_center": (232, 219, 235), "hsv_range": ((218, 60, 40), (248, 255, 255))},
+    "影紫": {"hsv_center": (266, 255, 187), "hsv_range": ((252, 60, 30), (280, 255, 255))},
+    "桃红": {"hsv_center": (0, 190, 255), "hsv_range": ((0, 50, 50), (8, 255, 255))},
+    "夕橙": {"hsv_center": (25, 251, 231), "hsv_range": ((15, 60, 40), (35, 255, 255))},
+    "桂黄": {"hsv_center": (56, 255, 255), "hsv_range": ((42, 60, 40), (70, 255, 255))},
+    "茶绿": {"hsv_center": (141, 199, 255), "hsv_range": ((126, 50, 40), (156, 255, 255))},
+    "湖青": {"hsv_center": (182, 193, 255), "hsv_range": ((168, 50, 50), (196, 255, 255))},
+    "沧蓝": {"hsv_center": (225, 187, 255), "hsv_range": ((210, 50, 50), (240, 255, 255))},
+    "黛紫": {"hsv_center": (281, 255, 231), "hsv_range": ((268, 60, 40), (292, 255, 255))},
 }
 
 

@@ -19,7 +19,7 @@ from mediapipe.tasks.python import BaseOptions
 from mediapipe.tasks.python.vision import RunningMode
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODEL_PATH = os.path.join(PROJECT_ROOT, 'hand_landmarker.task')
+MODEL_PATH = os.path.join(PROJECT_ROOT, 'vision', 'hand_landmarker.task')
 CALIB_FILE = os.path.join(PROJECT_ROOT, 'calibration.json')
 
 

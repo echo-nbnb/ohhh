@@ -74,10 +74,57 @@ async function mockRecognizeSketch() {
   return { label: "桥", description: ["你画下了一座桥。", "桥连接两岸，也连接出发与归来。"], overlay: { scale: 1.35, offsetX: 0, offsetY: 0 } };
 }
 
-export default function Act3FormingVision({ primaryColor = "#F2E700", secondaryColor = "#355BFF", maxRounds = 2, onRecognizeSketch, onComplete, completeDelay = 2000, remotePoints = [] }) {
-  console.log("[Act3] Mounting with primaryColor:", primaryColor, "secondaryColor:", secondaryColor);
-  const sceneRef = useRef(null), canvasRef = useRef(null);
+export default function Act3FormingVision({ primaryColor = "#F2E700", secondaryColor = "#355BFF", maxRounds = 2, onRecognizeSketch, onComplete, completeDelay = 2000, remotePoints = [], onImageryConfirmed, remoteDrawRef }) {
+  const sceneRef = useRef(null), canvasRef = useRef(null), remoteCanvasRef = useRef(null);
+  const lastDrawPosRef = useRef(null);
   const [sceneSize, setSceneSize] = useState({ width: 1, height: 1 });
+
+  // Separate canvas for remote points — never cleared by React re-renders
+  useEffect(() => {
+    if (!remoteDrawRef) return;
+    remoteDrawRef.current = (x, y) => {
+      const c = remoteCanvasRef.current;
+      if (!c) return;
+      const ctx = c.getContext("2d");
+      const prev = lastDrawPosRef.current;
+      const GAP = 100;
+      ctx.save();
+      ctx.strokeStyle = "rgba(180,160,120,0.55)";
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      if (prev && Math.hypot(x - prev.x, y - prev.y) < GAP) {
+        ctx.moveTo(prev.x, prev.y);
+        ctx.lineTo(x, y);
+      } else {
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + 0.3, y + 0.3);
+      }
+      ctx.stroke();
+      ctx.restore();
+      lastDrawPosRef.current = { x, y };
+    };
+    // Also expose clear function
+    remoteDrawRef.clear = () => {
+      const c = remoteCanvasRef.current;
+      if (c) { const ctx = c.getContext("2d"); ctx.clearRect(0, 0, c.width, c.height); }
+      lastDrawPosRef.current = null;
+    };
+    return () => { if (remoteDrawRef) { remoteDrawRef.current = null; remoteDrawRef.clear = null; } };
+  }, [remoteDrawRef]);
+
+  // Size the remote canvas to match scene
+  useEffect(() => {
+    const c = remoteCanvasRef.current;
+    if (!c || !sceneSize.width) return;
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    c.width = Math.max(1, Math.floor(sceneSize.width * dpr));
+    c.height = Math.max(1, Math.floor(sceneSize.height * dpr));
+    c.style.width = `${sceneSize.width}px`;
+    c.style.height = `${sceneSize.height}px`;
+    c.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
+  }, [sceneSize]);
   const [round, setRound] = useState(1);
   const [drawingEnabled, setDrawingEnabled] = useState(false);
   const [isRecognizing, setIsRecognizing] = useState(false);
@@ -116,7 +163,7 @@ export default function Act3FormingVision({ primaryColor = "#F2E700", secondaryC
     confirmedItems.forEach((it) => it.strokes.forEach((s) => drawStroke(ctx, s, { strokeStyle: "rgba(72,72,72,0.58)", lineWidth: 4, shadowBlur: 1 })));
     currentStrokes.forEach((s) => drawStroke(ctx, s, { strokeStyle: "rgba(50,50,50,0.78)", lineWidth: 4 }));
     if (activeStroke) drawStroke(ctx, activeStroke, { strokeStyle: "rgba(35,35,35,0.92)", lineWidth: 4 });
-    // Render remote points (from backend/camera) as faint glowing dots
+    // Render remote points as SEPARATE strokes (break at gaps > 80px)
     if (remotePoints.length > 1) {
       ctx.save();
       ctx.strokeStyle = "rgba(180,160,120,0.45)";
@@ -125,9 +172,20 @@ export default function Act3FormingVision({ primaryColor = "#F2E700", secondaryC
       ctx.lineJoin = "round";
       ctx.shadowColor = "rgba(200,180,140,0.4)";
       ctx.shadowBlur = 6;
+      const GAP = 80;
       ctx.beginPath();
       ctx.moveTo(remotePoints[0].x, remotePoints[0].y);
-      for (let i = 1; i < remotePoints.length; i++) ctx.lineTo(remotePoints[i].x, remotePoints[i].y);
+      for (let i = 1; i < remotePoints.length; i++) {
+        const prev = remotePoints[i - 1];
+        const curr = remotePoints[i];
+        if (Math.hypot(curr.x - prev.x, curr.y - prev.y) > GAP) {
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(curr.x, curr.y);
+        } else {
+          ctx.lineTo(curr.x, curr.y);
+        }
+      }
       ctx.stroke();
       ctx.restore();
     }
@@ -163,15 +221,20 @@ export default function Act3FormingVision({ primaryColor = "#F2E700", secondaryC
   const handleConfirm = async () => {
     if (isRecognizing) return;
     const payload = build(); if (!payload) return;
+    console.log("[Act3] handleConfirm — round:", round, "strokes:", allCurrentStrokes.length);
     const strokesToConfirm = allCurrentStrokes;
     setDrawingEnabled(false); setIsRecognizing(true); setSideLines(["让我读一读。"]); setCenterLines([]);
     try {
       const result = onRecognizeSketch ? await onRecognizeSketch(payload) : await mockRecognizeSketch(payload);
+      console.log("[Act3] recognizeSketch returned:", result?.label, result);
       const item = { id: `${Date.now()}-${Math.random()}`, round, strokes: strokesToConfirm, bbox: payload.bbox, label: result.label || "桥", description: result.description || ["你画下了一个意象。", "它正在颜色里浮现。"], stylizedImageUrl: result.stylizedImageUrl || resolveObjectImage(result.label), overlay: result.overlay || { scale: 1.35, offsetX: 0, offsetY: 0 } };
       setConfirmedItems((p) => [...p, item]); setCurrentStrokes([]); setActiveStroke(null);
+      // Notify parent for position tracking / auto-advance
+      onImageryConfirmed?.(item);
       const isLast = round >= maxRounds;
+      console.log("[Act3] isLast:", isLast, "round:", round, "maxRounds:", maxRounds, "onComplete:", !!onComplete);
       setTimeout(() => {
-        if (isLast) { setSideLines(["一个意象已经落下。", "它将被带往下一幕。"]); setCenterLines([]); setDrawingEnabled(false); setIsRecognizing(false); setTimeout(() => onComplete?.(), completeDelay); return; }
+        if (isLast) { setSideLines(["一个意象已经落下。", "它将被带往下一幕。"]); setCenterLines([]); setDrawingEnabled(false); setIsRecognizing(false); console.log("[Act3] Scheduling onComplete in", completeDelay, "ms"); setTimeout(() => { console.log("[Act3] Firing onComplete"); onComplete?.(); }, completeDelay); return; }
         setSideLines(["一个意象已经落下。", "你还想留下些什么？"]); setCenterLines(["继续画下另一个意象。", "画完后点击右下角确认。"]); setRound((p) => p + 1); setDrawingEnabled(true); setIsRecognizing(false);
       }, 2000);
     } catch (e) { console.error(e); setSideLines(["识别失败，请再试一次。"]); setCenterLines(["请重新绘制，或再次点击确认。"]); setDrawingEnabled(true); setIsRecognizing(false); }
@@ -189,6 +252,7 @@ export default function Act3FormingVision({ primaryColor = "#F2E700", secondaryC
       <div className="act3__sideCopy" key={sideLines.join("-")}>{sideLines.map((l, i) => <div key={`${l}-${i}`} className="act3__sideLine">{l}</div>)}</div>
       {centerLines.length > 0 && (<div className="act3__centerPrompt" key={centerLines.join("-")}>{centerLines.map((l, i) => <div key={`${l}-${i}`} className="act3__centerLine">{l}</div>)}</div>)}
       <canvas ref={canvasRef} className="act3__drawCanvas" />
+      <canvas ref={remoteCanvasRef} className="act3__remoteCanvas" />
       <div className="act3__resultsLayer">
         {confirmedItems.map((item) => {
           const vw = Math.max(item.bbox.normalized.width * 100 * (item.overlay?.scale || 1.35), 13);
