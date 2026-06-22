@@ -86,19 +86,20 @@ export default function Act3FormingVision({ primaryColor = "#F2E700", secondaryC
       if (!c) return;
       const ctx = c.getContext("2d");
       const prev = lastDrawPosRef.current;
-      const GAP = 100;
       ctx.save();
       ctx.strokeStyle = "rgba(180,160,120,0.55)";
       ctx.lineWidth = 3;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.beginPath();
-      if (prev && Math.hypot(x - prev.x, y - prev.y) < GAP) {
+      if (prev) {
+        // 后端连续发送点，始终连线
         ctx.moveTo(prev.x, prev.y);
         ctx.lineTo(x, y);
       } else {
+        // 第一个点：画一个可见的起点
         ctx.moveTo(x, y);
-        ctx.lineTo(x + 0.3, y + 0.3);
+        ctx.lineTo(x + 0.5, y + 0.5);
       }
       ctx.stroke();
       ctx.restore();
