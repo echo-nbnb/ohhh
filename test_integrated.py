@@ -348,8 +348,8 @@ class IntegratedServer:
 
                 self.main_client = client
 
-                # 完整重置：每次新连接都从头开始
-                self._color_done = False
+                # 新连接：重置物件/轨迹，但不重置 _color_done
+                # （避免 React StrictMode 双挂载把刚择好的色清零）
                 self._pipeline_running = False
                 self._hand_lost_frames = 0
                 self._waiting_for_screenshot = False
@@ -359,7 +359,9 @@ class IntegratedServer:
                 self.fsm._recognized_object = None
                 if self.fsm:
                     self.fsm.reset_to_global()
-                    self.fsm.trigger_color_extraction_start()
+                    # 只在真正空闲时触发择色（_color_done=False 说明还没择过色）
+                    if not self._color_done:
+                        self.fsm.trigger_color_extraction_start()
                 _debug_log.info("STATE_RESET | 新客户端连接，完整重置回 COLOR_EXTRACTION")
 
                 self._send_main({"type": "connected",
@@ -1110,19 +1112,18 @@ class IntegratedServer:
 
                 self._prev_hand_detected = True
 
-                # ── 颜色确认后手出现即画（只在非择色模式下）──
-                _drawing_modes = {GestureMode.GLOBAL, GestureMode.DRAWING, GestureMode.CANDIDATE}
-                if self.main_client and self._color_done and self.fsm.mode in _drawing_modes:
+                # ── 颜色确认后手出现即画 ──
+                if self.main_client and self._color_done:
                     if not self.fsm.is_drawing:
                         # 直接设置 mode + sub_state，不用 _transition_to
                         self.fsm.mode = GestureMode.DRAWING
                         self.fsm.drawing_sub = DrawingSubState.TRACKING
                         self._send_main({"type": "drawing_start", "message": "开始绘画"})
                     index_tip = fingertips[1]
-                    # 归一化到 0-1（相对于 output_size），前端自行缩放到画布
+                    # 归一化到 0-1 + 左右镜像（摄像头镜像，用户左右一致）
                     ow, oh = self.hand_tracker.output_size
                     self._send_main({"type": "drawing_point",
-                                     "x": index_tip[0] / max(ow, 1),
+                                     "x": 1.0 - index_tip[0] / max(ow, 1),
                                      "y": index_tip[1] / max(oh, 1)})
                 self._hand_lost_frames = 0
 

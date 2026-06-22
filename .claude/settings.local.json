@@ -65,7 +65,8 @@
       "Bash(npx tailwindcss *)",
       "Bash(git reset *)",
       "Bash(git commit *、)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(git checkout *)"
     ]
   }
 }
