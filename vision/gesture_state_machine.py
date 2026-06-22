@@ -487,8 +487,8 @@ class GestureStateMachine:
         }
 
         # 手指伸展检测：指尖 y < MCP y（MediaPipe 坐标系 y 向下）
-        # 展览环境提高到 0.05，减少误触
-        threshold = 0.05
+        # IP摄像头远距离：降低阈值提高灵敏度
+        threshold = 0.02
         extended = {
             name: tip_y < mcp_y - threshold
             for name, (tip_y, mcp_y) in tips.items()

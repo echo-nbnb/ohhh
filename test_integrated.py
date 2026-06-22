@@ -120,6 +120,7 @@ class IntegratedServer:
         self._pending_trajectory: List = []  # 临时存储待确认的轨迹
         self._waiting_for_screenshot = False  # 等前端截图再生成明信片
         self._pending_postcard_data = None    # 缓存明信片数据等截图
+        self._hand_lost_frames = 0            # 手部丢失帧计数（自动提交用）
 
     # ── 启动 ───────────────────────────────────────────────
 
@@ -170,41 +171,49 @@ class IntegratedServer:
     # ── 摄像头 ─────────────────────────────────────────────
 
     def _init_camera(self) -> bool:
-        # 优先用电脑摄像头
-        print(f"\n[1] 打开电脑摄像头 (device=0)...")
-        try:
-            self.camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-            if self.camera.isOpened():
-                # 设置分辨率
-                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-                w = self.camera.get(cv2.CAP_PROP_FRAME_WIDTH)
-                h = self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT)
-                print(f"[OK] 电脑摄像头已就绪 ({int(w)}x{int(h)})")
-                return True
-        except Exception as e:
-            print(f"     电脑摄像头失败: {e}")
-
-        # 兜底: IP 摄像头
+        # IP 摄像头优先 — 用于手部追踪 + 绘画
         url = self.camera_url
         if not url:
-            try:
-                from config_ipcam import CAMERA_URL
-                url = CAMERA_URL
-            except ImportError:
-                url = ""
+            try: from config_ipcam import CAMERA_URL; url = CAMERA_URL
+            except ImportError: url = ""
+        ok = False
         if url and "YOUR_CAMERA" not in url:
-            print(f"     尝试 IP 摄像头: {url}")
+            print(f"\n[1a] 连接 IP 摄像头（主）: {url}")
             try:
                 from vision.ipcamera import IPCamera
-                self.camera = IPCamera(url)
+                self.camera = IPCamera(url, target_width=1280, target_height=720)
                 if self.camera.connect():
-                    print("[OK] IP摄像头已连接")
-                    return True
+                    print("[OK] IP摄像头已就绪（主）")
+                    ok = True
             except Exception as e:
                 print(f"     IP摄像头失败: {e}")
 
-        return False
+        # 兜底: 电脑摄像头（仅手部追踪，不含衣物检测）
+        if not ok:
+            print(f"\n[1b] IP不可用，尝试电脑摄像头（主）...")
+            try:
+                self.camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+                if self.camera.isOpened():
+                    self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                    self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                    print("[OK] 电脑摄像头已就绪（主）")
+                    ok = True
+            except Exception as e:
+                print(f"     电脑摄像头失败: {e}")
+
+        # 衣物颜色检测专用摄像头（始终开电脑摄像头）
+        print("[1c] 电脑摄像头（衣物颜色检测）...")
+        try:
+            self.webcam = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            if self.webcam.isOpened():
+                self.webcam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                self.webcam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                print("[OK] 衣物颜色摄像头已就绪")
+        except Exception as e:
+            print(f"     衣物摄像头失败: {e}")
+            self.webcam = None
+
+        return ok
 
     def _init_hand_tracker(self):
         print("[2] 初始化手部跟踪 (MediaPipe)...")
@@ -220,8 +229,8 @@ class IntegratedServer:
 
     def _init_gesture_fsm(self):
         print("[3] 初始化手势状态机...")
-        from vision.gesture_state_machine import create_gesture_state_machine, GestureMode
-        self.fsm = create_gesture_state_machine(debounce_frames=12)
+        from vision.gesture_state_machine import create_gesture_state_machine, GestureMode, DrawingSubState
+        self.fsm = create_gesture_state_machine(debounce_frames=3)
 
         # 回调：模式切换 → 发送到前端
         self.fsm.on_mode_change = self._on_fsm_mode_change
@@ -983,6 +992,10 @@ class IntegratedServer:
                 hand_lm = results.hand_landmarks[0]
                 self.fsm.process(hand_lm, ts)
 
+                # 每15帧发送手势状态，确保前端同步
+                if self.main_client and self.frame_count % 5 == 0:
+                    self._send_gesture_state()
+
                 # ── 帧级调试日志（每30帧写一次，避免刷盘）──
                 if self.frame_count - _last_log_frame >= 30:
                     _last_log_frame = self.frame_count
@@ -1034,14 +1047,16 @@ class IntegratedServer:
 
                 self._prev_hand_detected = True
 
-                # ── drawing_point: 绘画模式下发送食指指尖到前端 ──
-                if self.fsm.is_drawing and self.main_client:
-                    index_tip = fingertips[1]  # 食指指尖
-                    self._send_main({
-                        "type": "drawing_point",
-                        "x": index_tip[0],
-                        "y": index_tip[1],
-                    })
+                # ── drawing_point: GLOBAL模式手出现即画，不需特定手势 ──
+                if self.main_client:
+                    if self.fsm.mode.value == "GLOBAL" and not self.fsm.is_drawing:
+                        self.fsm._transition_to(GestureMode.DRAWING, "TRACKING")
+                        self.fsm.drawing_sub = DrawingSubState.TRACKING
+                        self._send_main({"type": "drawing_start", "message": "开始绘画"})
+                    if self.fsm.is_drawing:
+                        index_tip = fingertips[1]
+                        self._send_main({"type": "drawing_point", "x": index_tip[0], "y": index_tip[1]})
+                self._hand_lost_frames = 0
 
                 # ── 可视化（仅在非 --no-display 模式） ──
                 if not self.no_display:
@@ -1067,6 +1082,18 @@ class IntegratedServer:
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, u_color, 2)
             else:
                 self.fsm.process(None, ts)
+                # Auto-commit drawing if hand lost for 3 seconds
+                if self.fsm.is_drawing:
+                    self._hand_lost_frames += 1
+                    if self._hand_lost_frames == 1:
+                        print(f"  [Auto] 开始计数: is_drawing={self.fsm.is_drawing} sub={self.fsm.drawing_sub} traj={len(self.fsm.trajectory)}")
+                    if self._hand_lost_frames >= 90:
+                        print(f"  [Auto-Commit] 手部消失3秒提交，轨迹点={len(self.fsm.trajectory)}")
+                        traj = list(self.fsm.trajectory)
+                        self._on_drawing_commit(traj)
+                        self.fsm.trajectory.clear()
+                        self.fsm._transition_to(GestureMode.GLOBAL, "IDLE")
+                        self._hand_lost_frames = 0
                 # ── 无手部帧日志（每60帧一次）──
                 if self.frame_count - _last_log_frame >= 60:
                     _last_log_frame = self.frame_count

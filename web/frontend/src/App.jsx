@@ -210,17 +210,19 @@ export default function App() {
       const r = mockDetectColor();
       schedule(() => applyColorResult(r.color, r.source, r.confidence), 3000);
     }
-    // Live mode: if colors already cached (during Act1), drive full step progression
-    if (mode === "live" && colors.length > 0) {
-      if (colors.length >= 2) {
-        // Both colors cached → fast-forward to step 4
-        schedule(() => setColorStep(3), 2000);
-        schedule(() => setColorStep(4), 4000);
-      } else {
-        // One color cached → show steps 2→3→4
+    // Live mode: always drive step progression (even with 0 colors)
+    if (mode === "live") {
+      if (colors.length === 0) {
+        schedule(() => setColorStep(2), 3000);
+        schedule(() => setColorStep(3), 8000);
+        schedule(() => setColorStep(4), 12000);
+      } else if (colors.length === 1) {
         schedule(() => setColorStep(2), 2000);
         schedule(() => setColorStep(3), 4500);
         schedule(() => setColorStep(4), 7000);
+      } else {
+        schedule(() => setColorStep(3), 2000);
+        schedule(() => setColorStep(4), 4000);
       }
     }
   }, [addLog, mode, schedule, applyColorResult, colors.length]);
