@@ -135,6 +135,7 @@ class GestureStateMachine:
 
         # 状态转移冷却: 转移后 N 帧内忽略手势变化，防止一次握拳触发多轮循环
         self._cooldown_remaining: int = 0
+        self._cooldown_frames: int = 30  # ~1s cooldown after each transition
 
         # 回调
         self.on_mode_change: Optional[Callable[[str, str, str], None]] = None
@@ -382,7 +383,7 @@ class GestureStateMachine:
         self.mode = mode
         self._still_start = 0.0
         # Cooldown: prevent same gesture from immediately re-triggering another transition
-        self._cooldown_remaining = 10
+        self._cooldown_remaining = self._cooldown_frames
         self._gesture_votes.clear()
         self._notify_mode_change(sub_state)
         logger.info(f"GestureFSM: {old_mode} → {mode.value} ({sub_state})")

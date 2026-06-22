@@ -26,8 +26,13 @@ export function recognizeObject(points, colorName = "") {
 
   let family = closed ? "closed" : width > height * 1.25 ? "horizontal" : "vertical";
   const candidates = objects.filter((item) => item.family === family);
+
+  // 多样性: 轨迹特征哈希 + 颜色种子 + 时间噪声, 避免总是同一结果
+  const trajHash = points.reduce((h, p, i) => h + Math.round(p.x * 7 + p.y * 13) * (i + 1), 0);
   const colorSeed = [...colorName].reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  const selected = candidates[(points.length + colorSeed) % candidates.length];
+  const timeNoise = Math.floor(Date.now() / 3000) % 97; // 3秒窗口变化
+  const idx = (trajHash + colorSeed + timeNoise) % candidates.length;
+  const selected = candidates[idx];
 
   return {
     ...selected,

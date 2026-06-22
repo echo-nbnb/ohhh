@@ -118,6 +118,8 @@ class IntegratedServer:
         self._prev_hand_detected = False
         self._hand_appeared_sent = False  # 防止重复发送
         self._pending_trajectory: List = []  # 临时存储待确认的轨迹
+        self._waiting_for_screenshot = False  # 等前端截图再生成明信片
+        self._pending_postcard_data = None    # 缓存明信片数据等截图
 
     # ── 启动 ───────────────────────────────────────────────
 
@@ -219,7 +221,7 @@ class IntegratedServer:
     def _init_gesture_fsm(self):
         print("[3] 初始化手势状态机...")
         from vision.gesture_state_machine import create_gesture_state_machine, GestureMode
-        self.fsm = create_gesture_state_machine(debounce_frames=5)
+        self.fsm = create_gesture_state_machine(debounce_frames=12)
 
         # 回调：模式切换 → 发送到前端
         self.fsm.on_mode_change = self._on_fsm_mode_change
@@ -406,7 +408,9 @@ class IntegratedServer:
         try:
             data = json.loads(msg)
             msg_type = data.get("type", data.get("event", ""))
-            print(f"[前端→] {msg_type}: {json.dumps(data, ensure_ascii=False)[:120]}")
+            print(f"[前端→] {msg_type}: {json.dumps(data, ensure_ascii=False)[:80]}")
+            if msg_type == "screenshot_upload":
+                print(f"[Screenshot] RECEIVED! Size: {len(data.get('image_base64',''))}")
 
             if msg_type == "gesture_simulate":
                 # TCP 手势模拟（测试用）
@@ -455,6 +459,40 @@ class IntegratedServer:
                 pass  # 轮盘暂不实现
             elif msg_type == "wheel_character_selected":
                 pass
+            elif msg_type == "screenshot_upload":
+                # 前端发来的明信片截图 → 上传OSS → 回传URL → 重置
+                import base64 as b64
+                import io as _io
+                from PIL import Image as _PILImage
+                img_b64 = data.get("image_base64", "")
+                if img_b64 and img_b64.startswith("data:image"):
+                    try:
+                        img_b64 = img_b64.split(",", 1)[1]
+                        img_bytes = b64.b64decode(img_b64)
+                        img = _PILImage.open(_io.BytesIO(img_bytes))
+                        from rag.uploader import PostcardUploader
+                        uploader = PostcardUploader()
+                        result = uploader.upload(img)
+                        self._send_main({
+                            "type": "postcard_result",
+                            "image_url": result["image_url"],
+                            "qr_base64": result["qr_base64"],
+                            "unique_id": result["unique_id"],
+                            "message": "扫码带走你的千年色。"
+                        })
+                        print(f"  [Screenshot] 截图已上传: {result['image_url']}")
+                        # 上传成功 → 重置状态准备下一轮
+                        self._waiting_for_screenshot = False
+                        self._pending_postcard_data = None
+                        self.selected_objects.clear()
+                        self.sketch_trajectories.clear()
+                        self._pending_trajectory = []
+                        self.fsm._recognized_object = None
+                        self.fsm.reset_to_global()
+                        self.fsm.trigger_color_extraction_start()
+                        _debug_log.info("STATE_RESET | 截图上传完成，重置回 COLOR_EXTRACTION")
+                    except Exception as e:
+                        print(f"  [Screenshot] 上传失败: {e}")
             else:
                 print(f"  → 未处理的消息类型: {msg_type}")
 
@@ -627,91 +665,123 @@ class IntegratedServer:
                     "message": "找到了。",
                     "character_name_hidden": True
                 })
-                # 第一人称演绎 (delay for LOADING→FOUND transition)
+                # 第一人称演绎 + 叙事 — DeepSeek LLM，失败 fallback 模板
                 time.sleep(3.0)
+                ch_name = top.get('name', '')
+                ch_title = top.get('title', '')
+                llm_performance = None
+                llm_narrative = None
+                try:
+                    import requests as _req
+                    api_key = "sk-26d289f20e1140408c282f5358af1e30"
+                    def _ds(prompt, max_tok=400):
+                        r = _req.post("https://api.deepseek.com/chat/completions",
+                            headers={"Authorization": f"Bearer {api_key}","Content-Type":"application/json"},
+                            json={"model":"deepseek-chat","messages":[{"role":"user","content":prompt}],"max_tokens":max_tok,"temperature":0.8},
+                            timeout=15)
+                        if r.status_code==200:
+                            return r.json()["choices"][0]["message"]["content"].strip()
+                        raise Exception(f"DeepSeek {r.status_code}")
+                    # Character monologue
+                    mp = f"写一段3-5句的第一人称独白，说话者是一位匿名的湖湘先贤（不要透露名字）。你对选择了「{self.current_color}」、画下「{'、'.join(objs)}」的后来说话。提及颜色和物象，有温度有文采。输出纯独白，不要引号不要角色名。"
+                    llm_raw = _ds(mp, 300)
+                    _all_names = ["朱熹","张栻","王夫之","周敦颐","胡宏","吕祖谦","陆九渊","王阳明","曾国藩","左宗棠","黄兴","蔡锷","宋教仁","陈天华","杨昌济","何叔衡","李达","程颢","程颐","胡安国","胡林翼","彭玉麟","谭嗣同","魏源","毛泽东","成仿吾","周谷城","何长工","熊十力","冯友兰","钱基博","金岳霖","梁漱溟","胡庶华","罗洪先"]
+                    for n in _all_names: llm_raw = llm_raw.replace(n, "…")
+                    llm_performance = llm_raw.split("\n")
+                    # Narrative
+                    np = f"为「寻麓千年色」写一段诗意叙事。颜色：{self.current_color}，物象：{'、'.join(objs)}，回应者：{ch_name}（{ch_title}）。要求：1)4-5句 2)语言优美有古韵 3)融入颜色和物象意境 4)体现湖湘千年文脉。只输出叙事。"
+                    llm_narrative = _ds(np, 400).split("\n")
+                    print(f"  [DeepSeek] 生成成功")
+                except Exception as e:
+                    print(f"  [DeepSeek] 失败，用模板: {e}")
+
+                # character_performance
+                perf = llm_performance if llm_performance else [
+                    f"你选择了{self.current_color}。",
+                    f"你画下了{'、'.join(objs)}。",
+                    "后来者，千年文脉在此刻与你相遇。"
+                ]
                 self._send_main({
                     "type": "character_performance",
                     "character": "????",
-                    "paragraphs": [
-                        f"你选择了{self.current_color}。",
-                        f"你画下了{'、'.join(objs)}。",
-                        "后来者，千年文脉在此刻与你相遇。"
-                    ]
+                    "paragraphs": perf
                 })
-                # 揭示人物 (delay for FRAME_EMPTY→BLUE_TEXT transition)
+                # 揭示人物 — 附带肖像URL
                 time.sleep(3.0)
+                portrait_map = {
+                    "胡宏":"huhong","李达":"lida","陆九渊":"lujiuyuan","王夫之":"wangfuzhi",
+                    "杨昌济":"yangchnagji","张栻":"zhangshi","周敦颐":"zhoudunyi","朱熹":"zhuxi",
+                    "黄兴":"huangxing","蔡锷":"caie","曾国藩":"zenguofan","左宗棠":"zuozongtang",
+                    "王阳明":"wangyangming","吕祖谦":"lvzuqian","宋教仁":"songjiaoreng",
+                    "陈天华":"chengtianhua","何叔衡":"heshuheng",
+                }
+                pf = portrait_map.get(ch_name, "")
                 self._send_main({
                     "type": "character_revealed",
-                    "name": top.get("name", ""),
-                    "title": top.get("title", ""),
-                    "message": f"刚才与你说话的，是{top.get('name','')}。"
+                    "name": ch_name,
+                    "title": ch_title,
+                    "portrait": pf,
+                    "monologue": perf,
+                    "message": f"刚才与你说话的，是{ch_name}。"
                 })
-                # 自动生成 (delay for YELLOW_TEXT→FINAL_REVEAL transition)
+                # 叙事生成
                 time.sleep(3.0)
+                narrative_text = llm_narrative if llm_narrative else [
+                    f"{self.current_color}已经展开。",
+                    f"{'、'.join(objs)}也已经落下。",
+                    f"{ch_name}的声音回荡在千年书院中。",
+                    "这就是你寻到的千年色。"
+                ]
                 gen_result = {
                     "type": "generation_result",
                     "title": "你寻到的千年色",
-                    "paragraphs": [
-                        f"{self.current_color}已经展开。",
-                        f"{'、'.join(objs)}也已经落下。",
-                        f"{top.get('name','')}的声音回荡在千年书院中。",
-                        "这就是你寻到的千年色。"
-                    ],
-                    "context": {
-                        "color": self.current_color,
-                        "objects": objs,
-                        "character": top.get("name", "")
-                    }
+                    "paragraphs": narrative_text,
+                    "context": {"color": self.current_color, "objects": objs, "character": ch_name}
                 }
                 self._send_main(gen_result)
 
-                # 明信片上传 OSS + 二维码
+                # 直接用真实数据生成明信片
                 try:
+                    import random as _random
                     from rag.uploader import PostcardUploader
                     from PIL import Image, ImageDraw, ImageFont
-                    # 生成简单的明信片
-                    card = Image.new("RGB", (1080, 1440), (245, 240, 230))
-                    draw = ImageDraw.Draw(card)
-                    # 尝试加载中文字体
-                    font = None
-                    for fp in [r"C:\Windows\Fonts\simhei.ttf",
-                               r"C:\Windows\Fonts\msyh.ttc",
-                               "C:\\Windows\\Fonts\\simsun.ttc"]:
+
+                    all_palette = {"岳麓绿":"#496b4a","书院红":"#8d3d36","湘江蓝":"#3f7082","西迁黄":"#a9823e","校徽金":"#c3a45e","墨色":"#333936","梨黄":"#F0E440","桂黄":"#F2E700","澄蓝":"#355BFF"}
+                    c1_hex = all_palette.get(self.current_color, "#496b4a")
+                    others = [h for n,h in all_palette.items() if n != self.current_color]
+                    c2_hex = others[_random.randint(0,len(others)-1)] if others else "#8d3d36"
+                    font_lg = font_md = font_sm = None
+                    for fp in [r"C:\Windows\Fonts\simhei.ttf",r"C:\Windows\Fonts\msyh.ttc",r"C:\Windows\Fonts\simsun.ttc"]:
                         if os.path.exists(fp):
-                            try:
-                                font = ImageFont.truetype(fp, 48)
-                                break
+                            try: font_lg=ImageFont.truetype(fp,64); font_md=ImageFont.truetype(fp,38); font_sm=ImageFont.truetype(fp,24); break
                             except: pass
-                    if font is None:
-                        font = ImageFont.load_default()
-
-                    y = 200
-                    draw.text((100, 80), "寻麓千年色", font=font, fill=(50, 40, 30))
-                    for para in gen_result["paragraphs"]:
-                        draw.text((100, y), para, font=font, fill=(60, 50, 40))
-                        y += 80
-                    draw.text((100, y + 60),
-                              f"颜色: {self.current_color}  物象: {'、'.join(objs)}  回应者: {top.get('name','')}",
-                              font=ImageFont.truetype(fp, 28) if font else font, fill=(120, 100, 80))
-                    draw.text((100, y + 120),
-                              f"湖南大学 · 寻麓千年色 · {datetime.now().strftime('%Y.%m.%d %H:%M')}",
-                              font=ImageFont.truetype(fp, 24) if font else font, fill=(120, 100, 80))
-
-                    uploader = PostcardUploader()
-                    result = uploader.upload(card)
-                    self._send_main({
-                        "type": "postcard_result",
-                        "image_url": result["image_url"],
-                        "qr_base64": result["qr_base64"],
-                        "unique_id": result["unique_id"],
-                        "message": "扫码带走你的千年色。"
-                    })
+                    if font_lg is None: font_lg=font_md=font_sm=ImageFont.load_default()
+                    W,H=1200,1600; M=60
+                    card=Image.new("RGB",(W,H),(252,250,246))
+                    draw=ImageDraw.Draw(card)
+                    bw=(W-3*M)//2
+                    draw.rectangle([M,M,M+bw,M+280],fill=c1_hex)
+                    draw.rectangle([M*2+bw,M,M*2+bw*2,M+280],fill=c2_hex)
+                    draw.text((M+16,M+296),self.current_color,font=font_sm,fill=(100,90,80))
+                    # Objects
+                    draw.text((M,M+380),"你筑下的景",font=font_sm,fill=(140,130,120))
+                    draw.text((M,M+420),"、".join(objs),font=font_lg,fill=(45,38,30))
+                    # Character
+                    draw.text((M,M+540),"回应你的人",font=font_sm,fill=(140,130,120))
+                    draw.text((M,M+580),f"{top.get('name','')}　{top.get('title','')}",font=font_md,fill=(65,55,45))
+                    y=M+680
+                    for p in gen_result["paragraphs"][:3]:
+                        draw.text((M,y),p,font=font_sm,fill=(85,75,65)); y+=50
+                    draw.line([M,y+20,W-M,y+20],fill=(190,182,175),width=1)
+                    draw.text((M,y+38),f"湖南大学 · 寻麓千年色 · {datetime.now().strftime('%Y.%m.%d %H:%M')}",font=font_sm,fill=(150,145,140))
+                    uploader=PostcardUploader()
+                    result=uploader.upload(card)
+                    self._send_main({"type":"postcard_result","image_url":result["image_url"],"qr_base64":result["qr_base64"],"unique_id":result["unique_id"],"message":"扫码带走你的千年色。"})
                     print(f"  [Postcard] 已上传: {result['image_url']}")
                 except Exception as e:
-                    print(f"  [Postcard] 上传失败: {e}")
+                    print(f"  [Postcard] 失败: {e}")
 
-            # ── 流程完成，等待前端播完再重置 ──
-            time.sleep(20.0)  # give frontend Act4/5 time to animate (~70s total)
+            time.sleep(20.0)
             self.selected_objects.clear()
             self.sketch_trajectories.clear()
             self._pending_trajectory = []
@@ -911,8 +981,6 @@ class IntegratedServer:
 
             if results.hand_landmarks:
                 hand_lm = results.hand_landmarks[0]
-
-                # → 手势状态机（使用归一化坐标）
                 self.fsm.process(hand_lm, ts)
 
                 # ── 帧级调试日志（每30帧写一次，避免刷盘）──

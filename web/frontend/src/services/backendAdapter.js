@@ -58,8 +58,9 @@ export function normalizeBackendMessage(payload) {
           name: asStr(payload.name, "回应者"),
           title: asStr(payload.title),
           reason: asStr(payload.message),
-          monologue: [],
-          spiritLine: "",
+          portrait: asStr(payload.portrait, ""),
+          monologue: asArr(payload.monologue ?? payload.paragraphs ?? payload.performance),
+          spiritLine: asStr(payload.spiritLine ?? payload.spirit_line ?? payload.summary, ""),
         },
       };
 
@@ -73,6 +74,7 @@ export function normalizeBackendMessage(payload) {
 
     // ---- Hand tracking → drawing_point (备选: 从手部通道提取食指指尖) ----
     case "hand_tracking": {
+      // 优先取 fingertips
       const ft = payload.fingertips;
       if (Array.isArray(ft) && ft.length >= 4) {
         // 平面数组 [thumb_x, thumb_y, index_x, index_y, ...]
@@ -81,6 +83,14 @@ export function normalizeBackendMessage(payload) {
         const tip = ft[1]; // 食指 (index 1)
         if (Array.isArray(tip) && tip.length >= 2) return { type: MESSAGE_TYPES.DRAWING_POINT, x: tip[0], y: tip[1] };
         if (tip && typeof tip === "object") return { type: MESSAGE_TYPES.DRAWING_POINT, x: tip.x ?? tip[0] ?? 0, y: tip.y ?? tip[1] ?? 0 };
+      }
+      // Fallback: 从 landmarks (MediaPipe 21点) 取食指指尖 index=8
+      const lm = payload.landmarks;
+      if (Array.isArray(lm) && lm.length >= 9) {
+        const tip = lm[8];
+        if (tip && typeof tip === "object") {
+          return { type: MESSAGE_TYPES.DRAWING_POINT, x: Math.round((tip.x ?? 0.5) * 1280), y: Math.round((tip.y ?? 0.5) * 720) };
+        }
       }
       return null;
     }

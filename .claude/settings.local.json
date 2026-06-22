@@ -58,7 +58,11 @@
       "Bash(git commit -m 'docs: 更新 README + 新增交互设计/技术架构文档 *)",
       "Bash(powershell -Command 'Get-NetTCPConnection -LocalPort 5173,8080,8888,8889 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }')",
       "Bash(cmd *)",
-      "Bash(git commit -m 'feat: 颜色系统升级 v2 — 6色 → 21色三组 *)"
+      "Bash(git commit -m 'feat: 颜色系统升级 v2 — 6色 → 21色三组 *)",
+      "Bash(dir /b /od \"D:\\\\projects\\\\ohhh\\\\camera_debug.log\" \"D:\\\\projects\\\\ohhh\\\\backend.log\" \"D:\\\\projects\\\\ohhh\\\\ws_server.log\")",
+      "Bash(powershell -Command \"Get-Process -Id 40444,29388,6140 -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, CPU, WorkingSet64 | Format-Table -AutoSize\")",
+      "Bash(powershell *)",
+      "Bash(npx tailwindcss *)"
     ]
   }
 }

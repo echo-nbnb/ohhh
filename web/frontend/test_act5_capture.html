@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Act5 截图测试</title>
+<style>
+  body { margin: 0; background: #111; font-family: sans-serif; }
+  #root { width: 100vw; height: 100vh; }
+  #controls { position: fixed; top: 10px; right: 10px; z-index: 9999; display: flex; gap: 8px; }
+  #controls button { padding: 10px 16px; font-size: 14px; cursor: pointer; border: none; border-radius: 6px; }
+  .btn-capture { background: #4CAF50; color: #fff; }
+  .btn-capture2 { background: #2196F3; color: #fff; }
+  .btn-jump { background: #FF9800; color: #fff; }
+  #log { position: fixed; bottom: 10px; left: 10px; z-index: 9999; width: 400px; max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.85); color: #0f0; font: 11px monospace; padding: 8px; border-radius: 6px; }
+  #preview { position: fixed; bottom: 10px; right: 10px; z-index: 9998; max-width: 300px; border: 2px solid #4CAF50; border-radius: 6px; display: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="controls">
+  <button class="btn-jump" onclick="jumpToFinal()">跳到最终阶段</button>
+  <button class="btn-capture" onclick="testCapture()">测试截图(html2canvas)</button>
+  <button class="btn-capture2" onclick="testCanvasDraw()">测试截图(Canvas手绘)</button>
+</div>
+<pre id="log"></pre>
+<img id="preview" />
+<script type="importmap">
+{ "imports": { "react": "https://esm.sh/react@18", "react-dom/client": "https://esm.sh/react-dom@18/client", "html2canvas": "https://esm.sh/html2canvas@1.4.1" } }
+</script>
+<script type="module">
+import React, { useRef, useState, useEffect } from "react";
+import { createRoot } from "react-dom/client";
+import html2canvas from "html2canvas";
+
+const logEl = document.getElementById("log");
+function log(msg) {
+  const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  logEl.textContent += `[${time}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ── Preset test data ──
+const MOCK_DATA = {
+  colors: { primary: "#496b4a", secondary: "#8d3d36", primaryName: "岳麓绿", secondaryName: "书院红" },
+  selectedPlaces: ["岳麓山", "湘江水", "书院檐角"],
+  title: { cn: "岳麓绿映书院红", en: "GREEN MEETS RED" },
+  traceText: "[岳麓绿｜书院红] → [张栻]",
+  imageryItems: [
+    { id: "q1", name: "岳麓书院", imageUrl: "", description: ["你画下了岳麓书院。"], position: { left: 25, top: 55, width: 30 } },
+    { id: "q2", name: "古树", imageUrl: "", description: ["你画下了古树。"], position: { left: 68, top: 38, width: 22 } },
+  ],
+  objectText: ["绿与红的相遇，书院与古树，它们在一起了。"],
+  aiWriting: ["岳麓绿已经展开。", "岳麓书院、古树也已经落下。", "张栻的声音回荡在千年书院中。", "这就是你寻到的千年色。"],
+  person: { name: "张栻", portraitUrl: "" },
+  mainTitleImageUrl: "",
+  downloadQrUrl: "",
+  createdAtText: "2026.06.22\n11:30",
+};
+
+// Simple Act5 mock for test
+function TestAct5({ data, debugStage }) {
+  const sectionRef = useRef(null);
+
+  useEffect(() => {
+    log("TestAct5 mounted, data:", JSON.stringify(data.colors));
+    // Store ref on window for capture
+    window.__act5Ref = sectionRef;
+  }, []);
+
+  return (
+    React.createElement("section", {
+      ref: sectionRef,
+      style: {
+        position: "relative", width: "100vw", height: "100vh", overflow: "hidden",
+        background: "#f8f8f4", userSelect: "none"
+      }
+    },
+      // Background placeholder
+      React.createElement("div", { style: { position: "absolute", inset: 0, background: "linear-gradient(180deg, #f0ede5 0%, #f8f8f4 40%, #f0ede5 100%)" } }),
+
+      // Two color blocks (simulating color disk area)
+      React.createElement("div", { style: { position: "absolute", right: "8%", bottom: "15%", display: "flex", gap: 12, zIndex: 20 } },
+        React.createElement("div", { style: { width: 140, height: 140, borderRadius: "50%", background: data.colors.primary, boxShadow: "0 4px 20px rgba(0,0,0,0.15)" } }),
+        React.createElement("div", { style: { width: 140, height: 140, borderRadius: "50%", background: data.colors.secondary, boxShadow: "0 4px 20px rgba(0,0,0,0.15)" } }),
+      ),
+
+      // Title
+      React.createElement("div", { style: { position: "absolute", left: "7%", top: "12%", fontSize: "clamp(48px,6vw,96px)", color: "#2a2a2a", fontFamily: "'Source Han Serif CN',serif", letterSpacing: "0.04em", fontWeight: 700, zIndex: 16 } }, "寻麓千年色"),
+
+      // Color names
+      React.createElement("div", { style: { position: "absolute", left: "7%", top: "28%", fontSize: 20, color: "#666", zIndex: 16 } }, `${data.colors.primaryName} · ${data.colors.secondaryName}`),
+
+      // Imagery items at positions
+      ...data.imageryItems.map((item, i) =>
+        React.createElement("div", {
+          key: item.id,
+          style: {
+            position: "absolute",
+            left: item.position ? `${item.position.left}%` : `${20 + i * 30}%`,
+            top: item.position ? `${item.position.top}%` : "55%",
+            width: item.position ? `${item.position.width}%` : "20%",
+            transform: "translate(-50%, -50%)",
+            textAlign: "center",
+            zIndex: 18,
+          }
+        },
+          React.createElement("div", { style: { fontSize: 24, color: "#444", fontFamily: "'Source Han Serif CN',serif" } }, item.name),
+          React.createElement("div", { style: { fontSize: 14, color: "#888", marginTop: 4 } }, item.description?.[0]),
+        )
+      ),
+
+      // AI Writing
+      React.createElement("div", { style: { position: "absolute", left: "7%", top: "42%", maxWidth: "28vw", fontSize: 16, color: "#555", lineHeight: 1.8, zIndex: 19 } },
+        ...data.aiWriting.map((line, i) => React.createElement("div", { key: i }, line))
+      ),
+
+      // Character name
+      React.createElement("div", { style: { position: "absolute", left: "7%", top: "68%", fontSize: 32, color: "#2a2a2a", fontFamily: "'Source Han Serif CN',serif", fontWeight: 600, zIndex: 20 } }, data.person.name),
+
+      // QR area
+      React.createElement("div", { style: { position: "absolute", right: "5%", top: "12%", width: 80, height: 80, background: "#fff", border: "3px solid #ddd", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#999", zIndex: 28 } }, "QR"),
+
+      // Date
+      React.createElement("div", { style: { position: "absolute", left: "50%", bottom: "8%", transform: "translateX(-50%)", fontSize: 18, color: "#999", zIndex: 22 } }, data.createdAtText),
+    )
+  );
+}
+
+// ── Test functions ──
+window.jumpToFinal = function() {
+  log("Rendering Act5 directly...");
+  // Re-render doesn't matter for this test
+};
+
+window.testCapture = async function() {
+  log("=== Testing html2canvas capture ===");
+  const el = window.__act5Ref?.current;
+  if (!el) { log("ERROR: No ref found. Render first."); return; }
+  log(`Element: ${el.tagName}, size: ${el.offsetWidth}x${el.offsetHeight}`);
+  try {
+    const canvas = await html2canvas(el, { scale: 1, backgroundColor: null, allowTaint: true, useCORS: true });
+    log(`Captured: ${canvas.width}x${canvas.height}`);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    log(`JPEG size: ${dataUrl.length} bytes`);
+    const preview = document.getElementById("preview");
+    preview.src = dataUrl;
+    preview.style.display = "block";
+    log("Preview shown. Check if image looks correct.");
+  } catch(e) {
+    log(`ERROR: ${e.message}`);
+  }
+};
+
+window.testCanvasDraw = function() {
+  log("=== Testing Canvas draw ===");
+  const c = document.createElement("canvas");
+  c.width = 800; c.height = 1100;
+  const ctx = c.getContext("2d");
+  const data = MOCK_DATA;
+  const W = 800, H = 1100, M = 40;
+  ctx.fillStyle = "#faf8f4"; ctx.fillRect(0, 0, W, H);
+  const bw = (W - 3*M) / 2;
+  ctx.fillStyle = data.colors.primary; ctx.fillRect(M, M, bw, 200);
+  ctx.fillStyle = data.colors.secondary; ctx.fillRect(M*2+bw, M, bw, 200);
+  ctx.fillStyle = "#2a2a2a"; ctx.font = "bold 56px serif";
+  ctx.fillText("寻麓千年色", M, M+280);
+  ctx.fillStyle = "#555"; ctx.font = "36px serif";
+  ctx.fillText(data.imageryItems.map(it => it.name).join(" · "), M, M+350);
+  ctx.fillStyle = "#444"; ctx.font = "30px serif";
+  ctx.fillText(data.person.name, M, M+420);
+  ctx.fillStyle = "#666"; ctx.font = "22px serif";
+  data.aiWriting.forEach((line, i) => ctx.fillText(line, M, M+500 + i*44));
+  ctx.fillStyle = "#aaa"; ctx.font = "18px serif";
+  ctx.fillText("湖南大学 · 寻麓千年色", M, H-M);
+
+  const dataUrl = c.toDataURL("image/jpeg", 0.9);
+  log(`Canvas drawn: ${W}x${H}, JPEG: ${dataUrl.length} bytes`);
+  const preview = document.getElementById("preview");
+  preview.src = dataUrl;
+  preview.style.display = "block";
+};
+
+// ── Render ──
+const root = createRoot(document.getElementById("root"));
+root.render(React.createElement(TestAct5, { data: MOCK_DATA }));
+log("Page loaded. Click test buttons to capture.");
+</script>
+</body>
+</html>

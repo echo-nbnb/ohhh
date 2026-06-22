@@ -62,19 +62,18 @@ function exportSketchImageData(strokes, w, h) {
 
 function resolveObjectImage(label) {
   try {
-    // 命名约定：assets/act3/objects/{物象名}.svg
-    return new URL(`../../assets/act3/objects/${label}.svg`, import.meta.url).href;
+    return new URL(`../../assets/act3/objects/${label}.png`, import.meta.url).href;
   } catch {
-    return bridgeDotsUrl; // 兜底
+    return new URL(`../../assets/act3/objects/${label}.svg`, import.meta.url).href;
   }
 }
 
 async function mockRecognizeSketch() {
   await new Promise((r) => setTimeout(r, 1100));
-  return { label: "桥", description: ["你画下了一座桥。", "桥连接两岸，也连接出发与归来。"], overlay: { scale: 1.35, offsetX: 0, offsetY: 0 } };
+  return { label: "石桥", description: ["你画下了一座石桥。", "桥连接两岸，也连接出发与归来。"], overlay: { scale: 1.35, offsetX: 0, offsetY: 0 } };
 }
 
-export default function Act3FormingVision({ primaryColor = "#F2E700", secondaryColor = "#355BFF", maxRounds = 2, onRecognizeSketch, onComplete, completeDelay = 2000, remotePoints = [], onImageryConfirmed, remoteDrawRef }) {
+export default function Act3FormingVision({ primaryColor = "#F2E700", secondaryColor = "#355BFF", maxRounds = 2, onRecognizeSketch, onComplete, completeDelay = 2000, remotePoints = [], onImageryConfirmed, remoteDrawRef, liveConfirmedItems = [], onCanvasSnapshot }) {
   const sceneRef = useRef(null), canvasRef = useRef(null), remoteCanvasRef = useRef(null);
   const lastDrawPosRef = useRef(null);
   const [sceneSize, setSceneSize] = useState({ width: 1, height: 1 });
@@ -226,13 +225,27 @@ export default function Act3FormingVision({ primaryColor = "#F2E700", secondaryC
     setDrawingEnabled(false); setIsRecognizing(true); setSideLines(["让我读一读。"]); setCenterLines([]);
     try {
       const result = onRecognizeSketch ? await onRecognizeSketch(payload) : await mockRecognizeSketch(payload);
-      console.log("[Act3] recognizeSketch returned:", result?.label, result);
-      const item = { id: `${Date.now()}-${Math.random()}`, round, strokes: strokesToConfirm, bbox: payload.bbox, label: result.label || "桥", description: result.description || ["你画下了一个意象。", "它正在颜色里浮现。"], stylizedImageUrl: result.stylizedImageUrl || resolveObjectImage(result.label), overlay: result.overlay || { scale: 1.35, offsetX: 0, offsetY: 0 } };
+      const imageUrl = result.stylizedImageUrl || resolveObjectImage(result.label);
+      console.log("[Act3] recognizeSketch returned:", result?.label, "imageUrl:", imageUrl, "full result:", result);
+      const item = { id: `${Date.now()}-${Math.random()}`, round, strokes: strokesToConfirm, bbox: payload.bbox, label: result.label || "桥", description: result.description || ["你画下了一个意象。", "它正在颜色里浮现。"], stylizedImageUrl: imageUrl, overlay: result.overlay || { scale: 1.35, offsetX: 0, offsetY: 0 } };
       setConfirmedItems((p) => [...p, item]); setCurrentStrokes([]); setActiveStroke(null);
       // Notify parent for position tracking / auto-advance
       onImageryConfirmed?.(item);
       const isLast = round >= maxRounds;
       console.log("[Act3] isLast:", isLast, "round:", round, "maxRounds:", maxRounds, "onComplete:", !!onComplete);
+      // Merge main + remote canvases into overlay snapshot for Act4/Act5
+      if (isLast && onCanvasSnapshot) {
+        const mc = canvasRef.current;
+        const rc = remoteCanvasRef.current;
+        if (mc && rc) {
+          const merged = document.createElement("canvas");
+          merged.width = mc.width; merged.height = mc.height;
+          const ctx = merged.getContext("2d");
+          if (mc.width > 0) ctx.drawImage(mc, 0, 0);
+          if (rc.width > 0) ctx.drawImage(rc, 0, 0);
+          onCanvasSnapshot(merged.toDataURL("image/png"));
+        }
+      }
       setTimeout(() => {
         if (isLast) { setSideLines(["一个意象已经落下。", "它将被带往下一幕。"]); setCenterLines([]); setDrawingEnabled(false); setIsRecognizing(false); console.log("[Act3] Scheduling onComplete in", completeDelay, "ms"); setTimeout(() => { console.log("[Act3] Firing onComplete"); onComplete?.(); }, completeDelay); return; }
         setSideLines(["一个意象已经落下。", "你还想留下些什么？"]); setCenterLines(["继续画下另一个意象。", "画完后点击右下角确认。"]); setRound((p) => p + 1); setDrawingEnabled(true); setIsRecognizing(false);
@@ -254,11 +267,13 @@ export default function Act3FormingVision({ primaryColor = "#F2E700", secondaryC
       <canvas ref={canvasRef} className="act3__drawCanvas" />
       <canvas ref={remoteCanvasRef} className="act3__remoteCanvas" />
       <div className="act3__resultsLayer">
-        {confirmedItems.map((item) => {
-          const vw = Math.max(item.bbox.normalized.width * 100 * (item.overlay?.scale || 1.35), 13);
-          const vl = item.bbox.normalized.centerX * 100 + (item.overlay?.offsetX || 0);
-          const vt = item.bbox.normalized.centerY * 100 + (item.overlay?.offsetY || 0);
+        {[...confirmedItems, ...liveConfirmedItems].map((item) => {
+          const bbox = item.bbox?.normalized || { width: 0.2, height: 0.2, centerX: 0.5, centerY: 0.5 };
+          const vw = Math.max(bbox.width * 100 * (item.overlay?.scale || 1.35), 13);
+          const vl = bbox.centerX * 100 + (item.overlay?.offsetX || 0);
+          const vt = bbox.centerY * 100 + (item.overlay?.offsetY || 0);
           const side = vl > 60 ? "left" : "right";
+          console.log("[Act3] render resultItem:", { label: item.label, imgUrl: item.stylizedImageUrl, vw, vl, vt });
           return (
             <div key={item.id} className="act3__resultItem">
               <img className="act3__resultVisual" src={item.stylizedImageUrl} alt={item.label} draggable="false" style={{ left: `${vl}%`, top: `${vt}%`, width: `${vw}%` }} />

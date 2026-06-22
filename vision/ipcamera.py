@@ -62,6 +62,17 @@ class IPCamera:
         """检查是否已连接"""
         return self._is_connected and self._cap is not None and self._cap.isOpened()
 
+    def read(self):
+        """兼容 cv2.VideoCapture.read() 接口"""
+        if not self.is_connected():
+            return False, None
+        ret, frame = self._cap.read()
+        if ret:
+            self._frame_count += 1
+            if frame.shape[1] > self.target_width or frame.shape[0] > self.target_height:
+                frame = cv2.resize(frame, (self.target_width, self.target_height))
+        return ret, frame
+
     def read_frame(self) -> Optional[np.ndarray]:
         """
         读取一帧图像，自动缩放到目标分辨率

@@ -13,7 +13,7 @@ export default function DualColorLiquidChrome({ colorA = "#F2E700", colorB = "#3
   useEffect(() => {
     if (!containerRef.current) return;
     const container = containerRef.current;
-    const renderer = new Renderer({ antialias: true, alpha: true });
+    const renderer = new Renderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     const gl = renderer.gl; gl.clearColor(1, 1, 1, 1);
     const colorAVec = hexToVec3(colorA), colorBVec = hexToVec3(colorB);
 

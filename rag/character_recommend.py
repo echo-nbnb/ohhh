@@ -168,7 +168,13 @@ class CharacterRecommender:
             return
         # 核心人物列表作为主数据，兼容从知识库补充
         self._char_index: Dict[str, Dict] = {}
+        # Only include characters with portrait files
+        _has_portrait = {"朱熹","张栻","王夫之","周敦颐","胡宏","吕祖谦","陆九渊","王阳明",
+                         "曾国藩","左宗棠","黄兴","蔡锷","宋教仁","陈天华",
+                         "杨昌济","何叔衡","李达"}
         for c in self.CORE_CHARACTERS:
+            if c["name"] not in _has_portrait:
+                continue
             self._char_index[c["name"]] = {
                 "type": "character",
                 "name": c["name"],

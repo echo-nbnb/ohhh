@@ -119,7 +119,7 @@ export default function Act4SpiritCalling({
       <div className="act4__bar act4__bar--bottom" style={createMaskStyle(barBottomUrl, secondaryColor, 1)} />
       <div className="act4__centerStage">
         {showFrame && <img className="act4__personFrame" src={personFrameUrl} alt="" draggable="false" />}
-        {showPortrait && <img className="act4__personPortrait" src={person?.portraitUrl || personMockUrl} alt={person?.name || "人物"} draggable="false" />}
+        {showPortrait && <img className="act4__personPortrait" src={(person?.portraitUrl && person.portraitUrl !== "") ? person.portraitUrl : personMockUrl} alt={person?.name || "人物"} draggable="false" />}
         {showBlocks && (<><div className="act4__blocks act4__blocks--primary" style={createMaskStyle(blocksPrimaryUrl, primaryColor, 1)} /><div className="act4__blocks act4__blocks--secondary" style={createMaskStyle(blocksSecondaryUrl, secondaryColor, 1)} /></>)}
       </div>
       {centerLines.length > 0 && (<div className="act4__centerCopy" key={`c-${stage}`}>{centerLines.map((l, i) => <div className="act4__centerLine" key={`${l}-${i}`}>{l}</div>)}</div>)}

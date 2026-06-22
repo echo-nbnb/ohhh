@@ -10,6 +10,12 @@ export function useWebSocket(url, onMessage) {
     onMessageRef.current = onMessage;
   }, [onMessage]);
 
+  const send = useCallback((data) => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify(data));
+    }
+  }, []);
+
   const disconnect = useCallback(() => {
     socketRef.current?.close();
     socketRef.current = null;
@@ -49,6 +55,10 @@ export function useWebSocket(url, onMessage) {
         console.log("[WS] Closed — code:", e.code, "reason:", e.reason);
         socketRef.current = null;
         setStatus((current) => (current === "error" ? current : "disconnected"));
+        // Auto-reconnect after 2s if not intentionally disconnected
+        if (e.code !== 1000) {
+          setTimeout(() => connect(), 2000);
+        }
       };
     } catch (e) {
       console.error("[WS] Connection exception:", e);
@@ -64,5 +74,5 @@ export function useWebSocket(url, onMessage) {
 
   useEffect(() => () => socketRef.current?.close(), []);
 
-  return { status, error, connect, disconnect };
+  return { status, error, connect, disconnect, send };
 }

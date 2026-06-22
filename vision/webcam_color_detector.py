@@ -28,29 +28,15 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 POSE_MODEL = os.path.join(PROJECT_ROOT, 'vision', 'pose_landmarker.task')
 SELFIE_MODEL = os.path.join(PROJECT_ROOT, 'vision', 'selfie_segmenter.tflite')
 
-# 21色HSV中心值（v2 三组）
+# 七色 HSV 中心值（OpenCV 精确计算，±10°H 范围）
 COLOR_HEX_VALUES = {
-    "朱红": {"hsv_center": (0, 254, 221), "hsv_range": ((0, 80, 40), (8, 255, 255))},
-    "灯橙": {"hsv_center": (24, 255, 254), "hsv_range": ((14, 80, 40), (34, 255, 255))},
-    "梨黄": {"hsv_center": (56, 187, 240), "hsv_range": ((42, 60, 40), (70, 255, 255))},
-    "叶绿": {"hsv_center": (102, 210, 255), "hsv_range": ((85, 60, 40), (118, 255, 255))},
-    "瓷青": {"hsv_center": (177, 218, 255), "hsv_range": ((162, 60, 40), (192, 255, 255))},
-    "海蓝": {"hsv_center": (220, 224, 255), "hsv_range": ((205, 60, 40), (235, 255, 255))},
-    "烟紫": {"hsv_center": (269, 255, 255), "hsv_range": ((255, 60, 40), (15, 255, 255))},
-    "枫红": {"hsv_center": (0, 255, 196), "hsv_range": ((0, 80, 30), (8, 255, 255))},
-    "暖橙": {"hsv_center": (38, 205, 255), "hsv_range": ((28, 60, 40), (48, 255, 255))},
-    "藤黄": {"hsv_center": (53, 255, 246), "hsv_range": ((40, 60, 40), (66, 255, 255))},
-    "玉绿": {"hsv_center": (123, 255, 235), "hsv_range": ((108, 60, 40), (138, 255, 255))},
-    "石青": {"hsv_center": (160, 196, 253), "hsv_range": ((145, 50, 40), (175, 255, 255))},
-    "澄蓝": {"hsv_center": (232, 219, 235), "hsv_range": ((218, 60, 40), (248, 255, 255))},
-    "影紫": {"hsv_center": (266, 255, 187), "hsv_range": ((252, 60, 30), (280, 255, 255))},
-    "桃红": {"hsv_center": (0, 190, 255), "hsv_range": ((0, 50, 50), (8, 255, 255))},
-    "夕橙": {"hsv_center": (25, 251, 231), "hsv_range": ((15, 60, 40), (35, 255, 255))},
-    "桂黄": {"hsv_center": (56, 255, 255), "hsv_range": ((42, 60, 40), (70, 255, 255))},
-    "茶绿": {"hsv_center": (141, 199, 255), "hsv_range": ((126, 50, 40), (156, 255, 255))},
-    "湖青": {"hsv_center": (182, 193, 255), "hsv_range": ((168, 50, 50), (196, 255, 255))},
-    "沧蓝": {"hsv_center": (225, 187, 255), "hsv_range": ((210, 50, 50), (240, 255, 255))},
-    "黛紫": {"hsv_center": (281, 255, 231), "hsv_range": ((268, 60, 40), (292, 255, 255))},
+    "朱红": {"hsv_center": (0, 254, 221), "hsv_range": ((0, 80, 60), (6, 255, 255))},
+    "灯橙": {"hsv_center": (12, 255, 254), "hsv_range": ((5, 80, 60), (20, 255, 255))},
+    "梨黄": {"hsv_center": (28, 187, 240), "hsv_range": ((20, 80, 80), (38, 255, 255))},
+    "叶绿": {"hsv_center": (51, 210, 255), "hsv_range": ((40, 80, 60), (62, 255, 255))},
+    "瓷青": {"hsv_center": (89, 218, 255), "hsv_range": ((78, 80, 60), (100, 255, 255))},
+    "海蓝": {"hsv_center": (110, 224, 255), "hsv_range": ((100, 80, 60), (122, 255, 255))},
+    "烟紫": {"hsv_center": (135, 255, 255), "hsv_range": ((125, 80, 60), (145, 255, 255))},
 }
 
 
@@ -444,7 +430,7 @@ class WebcamColorDetector:
                 best_color = color_name
 
         # 置信度阈值
-        if best_score < 0.3:
+        if best_score < 0.40:
             return None, 0.0
 
         return best_color, round(best_score, 3)

@@ -74,12 +74,24 @@ export const characters = [
 ];
 
 export function matchCharacter(colorName, objectName) {
-  const scored = characters.map((character) => ({
-    character,
-    score:
-      (character.colors.includes(colorName) ? 2 : 0) +
-      (character.objects.includes(objectName) ? 2 : 0),
-  }));
+  const scored = characters.map((character) => {
+    // 精确匹配 2 分，颜色名称包含匹配 1 分（如"湘江蓝"包含"蓝"字，匹配"海蓝"或"澄蓝"）
+    const colorScore = character.colors.includes(colorName) ? 2
+      : character.colors.some((c) => colorName.includes(c.slice(-1)) || c.includes(colorName.slice(-1))) ? 1
+      : 0;
+    const objectScore = character.objects.includes(objectName) ? 2
+      : 0;
+    return { character, score: colorScore + objectScore };
+  });
+
+  // 按分数降序排列
   scored.sort((a, b) => b.score - a.score);
-  return scored[0].character;
+
+  // 多样性: 同分角色中随机选取，而非总是第一个
+  const topScore = scored[0].score;
+  const topCandidates = scored.filter((item) => item.score === topScore);
+  const timeNoise = Math.floor(Date.now() / 5000) % 31; // 5秒窗口变化
+  const pick = topCandidates[(timeNoise + topCandidates.length) % topCandidates.length];
+
+  return pick.character;
 }

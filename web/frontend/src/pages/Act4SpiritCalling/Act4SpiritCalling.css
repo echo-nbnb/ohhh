@@ -30,9 +30,9 @@
 @keyframes act4PortraitIn{from{opacity:0;transform:translateX(-50%) translateY(18px) scale(0.96);filter:blur(10px)}to{opacity:1;transform:translateX(-50%) translateY(0) scale(1);filter:blur(0)}}
 @keyframes act4Float{from{transform:translateY(0)}to{transform:translateY(-10px)}}
 @keyframes act4IconFloat{0%{transform:translate3d(0,0,0) rotate(0deg) scale(0.85);opacity:0.5}30%{opacity:0.85}70%{opacity:0.55}100%{transform:translate3d(var(--drift-x),var(--drift-y),0) rotate(65deg) scale(1.15);opacity:0.4}}
-.act4__stampPrompt{position:absolute;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;animation:act4StampIn 0.8s ease forwards}
-.act4__stampText{font-family:"Source Han Serif CN","Noto Serif SC",serif;font-size:clamp(48px,6vw,96px);color:#3a2a1a;letter-spacing:0.12em;text-shadow:0 2px 16px rgba(0,0,0,0.08)}
-.act4__stampSub{margin-top:12px;font-size:clamp(16px,1.6vw,24px);color:#8a7a6a;letter-spacing:0.08em;animation:act4HintPulse 2.4s ease-in-out infinite}
+.act4__stampPrompt{position:absolute;right:8%;bottom:12%;z-index:50;display:flex;flex-direction:column;align-items:flex-end;pointer-events:none;animation:act4StampIn 0.8s ease forwards}
+.act4__stampText{font-family:"Source Han Serif CN","Noto Serif SC",serif;font-size:clamp(36px,5vw,64px);color:#3a2a1a;letter-spacing:0.08em;text-shadow:0 2px 16px rgba(0,0,0,0.08);text-align:right}
+.act4__stampSub{margin-top:8px;font-size:clamp(14px,1.4vw,20px);color:#8a7a6a;letter-spacing:0.06em;animation:act4HintPulse 2.4s ease-in-out infinite;text-align:right}
 @keyframes act4StampIn{from{opacity:0;transform:scale(1.08)}to{opacity:1;transform:scale(1)}}
 @keyframes act4HintPulse{0%,100%{opacity:0.4}50%{opacity:0.85}}
 @media(max-width:768px){.act4__title--top{width:92%}.act4__title--bottom{width:74%}.act4__centerStage{width:66vw;top:49%}.act4__centerCopy{width:74vw;font-size:20px}.act4__sideCopy--left,.act4__sideCopy--right,.act4__sideCopy.is-final.act4__sideCopy--left,.act4__sideCopy.is-final.act4__sideCopy--right{left:50%;right:auto;width:76vw;transform:translate(-50%,0);text-align:center}.act4__sideCopy--left{top:74%}.act4__sideCopy--right{top:18%}.act4__sideCopy.is-final.act4__sideCopy--left{top:78%;font-size:22px;font-weight:700}.act4__sideCopy.is-final.act4__sideCopy--right{top:18%;font-size:16px}}

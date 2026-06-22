@@ -1,8 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import Header from "./components/Header";
-import StageStepper from "./components/StageStepper";
-import StatusPanel from "./components/StatusPanel";
-import SystemLog from "./components/SystemLog";
 import { findColor } from "./data/colors";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { normalizeBackendMessage } from "./services/backendAdapter";
@@ -80,15 +76,28 @@ function buildAct5Data(colors, imageryItems, matchedCharacter, narrative, qrBase
     traceText: `[${c0?.name || "?"}｜${c1?.name || "?"}] → [${matchedCharacter?.name || "?"}]`,
     imageryItems: imageryItems.length > 0 ? imageryItems : [{ id: "obj", name: "意象", imageUrl: "", className: "act5__imagery--bridge" }, { id: "tree", name: "树", imageUrl: "", className: "act5__imagery--tree" }],
     objectText: imageryItems[0]?.description || ["这个意象已经落下。"],
-    aiWriting: narrative?.paragraphs || ["你的千年色正在成形……"],
-    person: { name: matchedCharacter?.name || "回应者", portraitUrl: "" },
-    mainTitleImageUrl: imageUrl || "", downloadQrUrl: qrBase64 || "",
+    aiWriting: (() => {
+      const names = imageryItems.map(it => it.name).filter(Boolean);
+      if (names.length >= 2 && narrative?.paragraphs) {
+        // Replace backend text's object references with deduplicated names
+        return narrative.paragraphs.map(p => {
+          let txt = p;
+          // Replace "X、Y" pattern with deduplicated names
+          const joined = names.join("、");
+          txt = txt.replace(/[^\s、]+、[^\s]+/g, joined);
+          return txt;
+        });
+      }
+      return narrative?.paragraphs || ["你的千年色正在成形……"];
+    })(),
+    person: { name: matchedCharacter?.name || "回应者", portraitUrl: matchedCharacter?.portrait ? `/src/assets/act5/people/${matchedCharacter.portrait}.png` : "" },
+    mainTitleImageUrl: "", downloadQrUrl: qrBase64 || "",
     createdAtText: dateStr,
   };
 }
 
 export default function App() {
-  const [mode, setMode] = useState("demo");
+  const mode = "live";
   const [currentStage, setCurrentStage] = useState(STAGES.INTRO);
   const [colors, setColors] = useState([]);          // [color1, color2?]
   const [colorSource, setColorSource] = useState(null);
@@ -99,13 +108,13 @@ export default function App() {
   const [matchedCharacter, setMatchedCharacter] = useState(null);
   const [spiritStatus, setSpiritStatus] = useState("idle");
   const [narrative, setNarrative] = useState(null);
-  const [logs, setLogs] = useState([]);
   const [isAutoAdvancing, setIsAutoAdvancing] = useState(false);
   const [colorStep, setColorStep] = useState(1);
   const [showAct1Transition, setShowAct1Transition] = useState(true);
   const [waitingForStamp, setWaitingForStamp] = useState(false); // Act4 等握拳盖章
   const [postcardQr, setPostcardQr] = useState("");       // QR base64 from backend
   const [postcardImageUrl, setPostcardImageUrl] = useState(""); // postcard image URL
+  const [act3Overlay, setAct3Overlay] = useState(null);    // Act3 canvas screenshot for overlay
   const postcardEnterTimeRef = useRef(0);    // when Act5 was entered
 
   const timersRef = useRef([]);
@@ -135,7 +144,7 @@ export default function App() {
   const schedule = useCallback((cb, delay) => { const t = setTimeout(() => { timersRef.current = timersRef.current.filter(i => i !== t); cb(); }, delay); timersRef.current.push(t); return t; }, []);
   useEffect(() => clearTimers, [clearTimers]);
 
-  const addLog = useCallback((msg) => { setLogs(c => [...c, { id: `${Date.now()}-${Math.random()}`, time: new Date().toLocaleTimeString("zh-CN", { hour12: false }), message: msg }]); }, []);
+  const addLog = useCallback((msg) => { console.log(`[${new Date().toLocaleTimeString("zh-CN", { hour12: false })}]`, msg); }, []);
 
   // ── Color detection (supports 2 colors) ──
   const applyColorResult = useCallback((detectedColor, source, confidence = null) => {
@@ -156,9 +165,9 @@ export default function App() {
       const newLen = Math.min(colorsRef.current.length + 1, 2);
       addLog(`择色${newLen}：读取为${detectedColor.name}`);
       if (newLen === 1) {
-        schedule(() => setColorStep(2), 2500);
-        schedule(() => setColorStep(3), 5000);
-        schedule(() => setColorStep(4), 7500);
+        schedule(() => setColorStep(2), 3000);
+        schedule(() => setColorStep(3), 8000);
+        schedule(() => setColorStep(4), 12000);
         // Cancelable fallback: pick a DIFFERENT color if second not detected in time
         if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
         fallbackTimerRef.current = setTimeout(() => {
@@ -171,7 +180,7 @@ export default function App() {
             setColorStep(4);
             addLog(`第二色超时，备选：${fbName}`);
           }
-        }, 10000);
+        }, 20000);
       } else if (newLen === 2) {
         // Second real color arrived — cancel fallback and jump to step 4
         if (fallbackTimerRef.current) { clearTimeout(fallbackTimerRef.current); fallbackTimerRef.current = null; }
@@ -252,38 +261,32 @@ export default function App() {
     setCurrentStage(STAGES.INTRO); setColors([]); setColorSource(null); setGesture(null);
     setPoints([]); setObjectResult(null); setImageryItems([]);
     setMatchedCharacter(null); setSpiritStatus("idle"); setNarrative(null);
-    setLogs([]); setIsAutoAdvancing(false); setColorStep(1); setWaitingForStamp(false);
+    setIsAutoAdvancing(false); setColorStep(1); setWaitingForStamp(false);
     fistTriggeredRef.current = false; colorLockedRef.current = false;
     liveObjectCountRef.current = 0;
     usedObjectNamesRef.current = [];
     resetCooldownUntil.current = Date.now() + 3000; // 3s grace after reset
+    setAct3Overlay(null);
     if (fallbackTimerRef.current) { clearTimeout(fallbackTimerRef.current); fallbackTimerRef.current = null; }
   }, [clearTimers]);
-
-  // ── Mode switching ──
-  const handleModeChange = (nextMode) => {
-    if (nextMode === mode) return;
-    if (mode === "live") socket.disconnect();
-    resetAll();
-    setMode(nextMode);
-    setLogs([{ id: `${Date.now()}-mode`, time: new Date().toLocaleTimeString("zh-CN", { hour12: false }), message: `切换至 ${nextMode === "demo" ? "Demo" : "Live"} Mode` }]);
-  };
 
   // ── Act3 sketch recognition ──
   const recognizeSketch = useCallback(async (payload) => {
     console.log("[App] recognizeSketch — mode:", mode, "cached:", latestRef.current.objectResult?.name);
     if (mode === "demo") {
-      const result = mockRecognizeObject(points.length > 0 ? points : [{ x: 200, y: 200 }, { x: 400, y: 200 }], colors[0]);
+      const validObjects = ["石桥","古树","书卷","岳麓书院","湘江","爱晚亭","碑刻","竹林","讲堂","石阶","岳麓山","长廊"];
+      const label = validObjects[Math.floor(Math.random() * validObjects.length)];
+      const result = { name: label, reason: `你画下了${label}。`, stylizedImageUrl: `/src/assets/act3/objects/${label}.png` };
       setObjectResult(result);
-      return { label: result.name, description: [result.reason] };
+      return { label: result.name, description: [result.reason], stylizedImageUrl: result.stylizedImageUrl };
     }
     const cached = latestRef.current.objectResult;
-    if (cached) return { label: cached.name, description: [cached.reason || `你画下了${cached.name}。`] };
+    if (cached) return { label: cached.name, description: [cached.reason || `你画下了${cached.name}。`], stylizedImageUrl: cached.stylizedImageUrl || `/src/assets/act3/objects/${cached.name}.png` };
     await new Promise(r => setTimeout(r, 1500));
     const retry = latestRef.current.objectResult;
-    if (retry) return { label: retry.name, description: [retry.reason || `你画下了${retry.name}。`] };
-    return { label: "桥", description: ["你画下了一个意象。"] };
-  }, [mode, points, colors]);
+    if (retry) return { label: retry.name, description: [retry.reason || `你画下了${retry.name}。`], stylizedImageUrl: retry.stylizedImageUrl || `/src/assets/act3/objects/${retry.name}.png` };
+    return { label: "石桥", description: ["你画下了一个意象。"], stylizedImageUrl: "/src/assets/act3/objects/石桥.png" };
+  }, [mode]);
 
   // ── Act4 spirit match ──
   const fetchSpiritMatch = useCallback(async () => {
@@ -302,7 +305,13 @@ export default function App() {
       };
     }
     const ch = latestRef.current.matchedCharacter;
-    if (ch) return { person: { id: ch.name, name: ch.name, subtitle: [ch.title || ""], portraitUrl: "" }, narrative: { centerStart: ["颜色已经展开", "意象也已经落下。"], centerSeek: ["现在", "我要在千年的文脉里", "寻找一个与你相遇的人。"], loading: ["正在寻找回应你的人……"], found: ["找到了！"], rightInterim: ["他还不能告诉你名字", "你要先听他说完。"], leftBlue: ch.monologue || [], leftYellow: ch.monologue || [], rightFinal: ch.spiritLine ? [ch.spiritLine] : [] } };
+    if (ch) {
+      console.log("[fetchSpiritMatch] character:", ch.name, "portrait:", ch.portrait);
+      return {
+        person: { id: ch.name, name: ch.name, subtitle: [ch.title || ""], portraitUrl: ch.portrait ? `/src/assets/act5/people/${ch.portrait}.png` : "" },
+        narrative: { centerStart: ["颜色已经展开", "意象也已经落下。"], centerSeek: ["现在", "我要在千年的文脉里", "寻找一个与你相遇的人。"], loading: ["正在寻找回应你的人……"], found: ["找到了！"], rightInterim: ["他还不能告诉你名字", "你要先听他说完。"], leftBlue: ch.monologue || [], leftYellow: ch.monologue || [], rightFinal: ch.spiritLine ? [ch.spiritLine] : [] }
+      };
+    }
     return null;
   }, [mode, colors, objectResult]);
 
@@ -351,10 +360,12 @@ export default function App() {
             resetAll();
           }
         }
-        // Live mode: fist on SPIRIT with waitingForStamp → advance to postcard
-        if (message.gesture === "fist" && stageRef.current === STAGES.SPIRIT && waitingForStamp) {
-          addLog("握拳盖章，生成明信片");
-          goToPostcard();
+        // Live mode: any hand gesture on SPIRIT with waitingForStamp → advance to postcard
+        if (stageRef.current === STAGES.SPIRIT && waitingForStamp) {
+          if (message.gesture === "fist" || message.gesture === "open_hand" || message.gesture === "index_pointing") {
+            addLog("握拳盖章，生成明信片");
+            goToPostcard();
+          }
         }
         break;
 
@@ -370,7 +381,7 @@ export default function App() {
         // Dedup object name: use ref (state may be stale)
         let objName = message.name;
         if (usedObjectNamesRef.current.includes(objName)) {
-          const fallbacks = ["古树","竹林","桥","山","灯","鸟","书卷","讲堂","亭台"];
+          const fallbacks = ["古树","书卷","石阶","岳麓书院","竹简","碑刻","讲堂","爱晚亭","石桥","长廊","匾额","竹林"];
           const unused = fallbacks.filter(n => !usedObjectNamesRef.current.includes(n));
           objName = unused[Math.floor(Math.random() * unused.length)];
           console.log("[App] Object dedup: same name, fallback to", objName);
@@ -387,21 +398,22 @@ export default function App() {
         drawPositionsRef.current = []; // reset for next drawing
         remoteDrawRef.current?.clear?.(); // clear remote canvas for next drawing
         usedObjectNamesRef.current.push(objName);
-        console.log("[App] OBJECT_RECOGNIZED:", objName, "count:", liveObjectCountRef.current, "pos:", position);
-        setObjectResult({ ...message, name: objName });
+        const pointillistUrl = `/src/assets/act3/objects/${objName}.png`;
+        console.log("[App] OBJECT_RECOGNIZED:", objName, "count:", liveObjectCountRef.current, "pos:", position, "img:", pointillistUrl);
+        setObjectResult({ ...message, name: objName, stylizedImageUrl: pointillistUrl });
         setImageryItems(prev => [...prev, {
           id: objName + liveObjectCountRef.current,
           name: objName,
           description: [message.reason || `你画下了${objName}。`],
-          imageUrl: "",
+          imageUrl: pointillistUrl,
           className: prev.length === 0 ? "act5__imagery--bridge" : "act5__imagery--tree",
           position,
         }]);
         addLog(`筑景完成：线条被叙事化为${objName}`);
         if (mode === "live" && liveObjectCountRef.current >= 2) {
-          console.log("[App] 2 objects confirmed, auto-advancing to spirit");
-          addLog("两个意象已经落下，进入唤灵");
-          setTimeout(() => goToSpiritRef.current?.(), 1500);
+          console.log("[App] 2 objects confirmed, auto-advancing to spirit in 4s");
+          addLog("两个意象已经落下，4秒后进入唤灵");
+          setTimeout(() => goToSpiritRef.current?.(), 4000);
         }
         break;
       }
@@ -409,8 +421,13 @@ export default function App() {
       case MESSAGE_TYPES.CHARACTER_MATCHED:
       case MESSAGE_TYPES.CHARACTERS_RECOMMENDED:
         if (message.character) {
-          console.log("[App] CHARACTER stored:", message.character.name);
-          setMatchedCharacter(message.character);
+          console.log("[App] CHARACTER stored:", message.character.name, "portrait:", message.character.portrait);
+          // Merge with existing — character_revealed may not have monologue/spiritLine
+          setMatchedCharacter(prev => ({ ...(prev || {}), ...message.character,
+            monologue: message.character.monologue?.length ? message.character.monologue : (prev?.monologue || []),
+            spiritLine: message.character.spiritLine || prev?.spiritLine || "",
+            portrait: message.character.portrait || prev?.portrait || "",
+          }));
           addLog(`人物匹配：${message.character.name}`);
         }
         break;
@@ -439,6 +456,11 @@ export default function App() {
   }, [addLog, applyColorResult, colors, imageryItems.length, resetAll, waitingForStamp, goToPostcard]);
 
   const socket = useWebSocket(WS_URL, handleBackendPayload);
+  const wsSend = socket.send;
+  useEffect(() => { socket.connect(); }, []); // auto-connect in live mode
+
+  // Capture Act3 scene as overlay for Act4/Act5
+  const onAct3Snapshot = useCallback((dataUrl) => { setAct3Overlay(dataUrl); }, []);
 
   // ── Act3 imagery confirmed callback (captures bbox for postcard) ──
   const onImageryConfirmed = useCallback((item) => {
@@ -473,13 +495,12 @@ export default function App() {
   }, [mode, goToPostcard, addLog]);
 
   // ── Render ──
-  const isActPage = currentStage !== "intro_old";
   const actualColors = colors.length > 0 ? colors : [];
 
   function renderCurrentStage() {
     switch (currentStage) {
       case STAGES.INTRO:
-        return <Act0 onNext={goToTransition} autoAdvanceDelay={5000} waitForGesture={mode === "live"} />;
+        return <Act0 onNext={goToTransition} autoAdvanceDelay={5000} waitForGesture={true} />;
 
       case STAGES.TRANSITION:
         return <Act1Entry switchDelay={7000} dissolveDelay={18000} onComplete={goToColor} onSkip={goToColor} dissolveOnCompleteDelay={1200} />;
@@ -506,7 +527,9 @@ export default function App() {
             onRecognizeSketch={recognizeSketch}
             onImageryConfirmed={onImageryConfirmed}
             onComplete={() => { console.log("[App] Act3 onComplete"); goToSpirit(); }}
+            onCanvasSnapshot={onAct3Snapshot}
             completeDelay={3000}
+            liveConfirmedItems={imageryItems.map(it => ({ id: it.id, label: it.name, description: it.description, stylizedImageUrl: it.imageUrl, overlay: { scale: 1.35, offsetX: 0, offsetY: 0 }, bbox: { normalized: { width: it.position?.width ? it.position.width / 100 : 0.2, height: 0.2, centerX: it.position?.left ? it.position.left / 100 : 0.5, centerY: it.position?.top ? it.position.top / 100 : 0.5 } } }))}
             remotePoints={[]}
             remoteDrawRef={remoteDrawRef}
           />
@@ -516,6 +539,7 @@ export default function App() {
         const a4 = buildAct4Payload(actualColors, objectResult);
         return (
           <Act4SpiritCalling
+            key={`${matchedCharacter?.name || "act4"}_${matchedCharacter?.portrait || "nopic"}`}
             {...a4}
             onFetchSpiritMatch={fetchSpiritMatch}
             waitingForStamp={waitingForStamp}
@@ -531,33 +555,22 @@ export default function App() {
             postcardData={buildAct5Data(actualColors, imageryItems, matchedCharacter, narrative, postcardQr, postcardImageUrl)}
             autoPlay={true}
             onComplete={() => addLog("明信片生成完成")}
-            onRestart={mode === "demo" ? resetAll : undefined}
+            wsSend={wsSend}
           />
         );
 
       default:
-        return <Act0 onNext={goToTransition} autoAdvanceDelay={4000} />;
+        return <Act0 onNext={goToTransition} autoAdvanceDelay={4000} waitForGesture={true} />;
     }
   }
 
   return (
     <div className="min-h-screen bg-ink text-white">
-      <div className={isActPage ? "fixed top-0 left-0 right-0 z-50 pointer-events-none" : ""}>
-        <div className={isActPage ? "pointer-events-auto" : ""}>
-          <Header mode={mode} onModeChange={handleModeChange} wsStatus={socket.status} wsError={socket.error} onConnect={socket.connect} onDisconnect={socket.disconnect} />
-        </div>
-      </div>
-      {!isActPage && <div className="border-b border-white/5 bg-black/10 px-4 py-4"><StageStepper currentStage={currentStage} /></div>}
-      <main className={isActPage ? "" : "mx-auto max-w-[1280px] px-4 py-6 md:px-8"}>
+      <main>
         {renderCurrentStage()}
-        {(mode === "live" || !isActPage) && (
-          <details className={mode === "live" && isActPage ? "fixed bottom-4 right-4 z-[100] max-w-sm rounded-xl border border-white/10 bg-black/85 text-sm text-white/60 backdrop-blur" : "mx-auto mt-6 max-w-5xl rounded-xl border border-white/5 bg-black/10 text-sm text-white/45"}>
-            <summary className="cursor-pointer px-4 py-3 hover:text-white/65">查看系统状态与事件日志</summary>
-            <div className="grid gap-5 border-t border-white/5 p-4 md:grid-cols-2">
-              <div><p className="eyebrow mb-3">CURRENT STATE</p><StatusPanel currentStage={currentStage} color={actualColors[0]} colorSource={colorSource} gesture={gesture} objectResult={objectResult} matchedCharacter={matchedCharacter} isAutoAdvancing={isAutoAdvancing} /></div>
-              <div><p className="eyebrow mb-3">SYSTEM LOG</p><SystemLog logs={logs} /></div>
-            </div>
-          </details>
+        {/* Persistent Act3 overlay — keep drawing lines visible through Act4/Act5 */}
+        {act3Overlay && (currentStage === STAGES.SPIRIT || currentStage === STAGES.POSTCARD) && (
+          <img src={act3Overlay} style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", objectFit: "contain", pointerEvents: "none", zIndex: 999, opacity: 0.3 }} alt="" />
         )}
       </main>
     </div>

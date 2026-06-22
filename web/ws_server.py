@@ -218,7 +218,7 @@ class WebSocketServer:
         self._running = True
         self.backend_main.connect()
 
-        async with websockets.serve(self.handle_client, self.host, self.port):
+        async with websockets.serve(self.handle_client, self.host, self.port, max_size=10*1024*1024):
             print(f"[WS] WebSocket服务器启动 ws://{self.host}:{self.port}")
             print(f"[WS] 桥接到后端 TCP {HOST}:{BACKEND_MAIN_PORT} 和 {HOST}:{BACKEND_HAND_PORT}")
             await asyncio.Future()  # 永久运行
