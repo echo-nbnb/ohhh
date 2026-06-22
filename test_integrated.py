@@ -30,7 +30,7 @@ from typing import Optional, Dict, List
 
 sys.path.insert(0, ".")
 
-from vision.gesture_state_machine import GestureMode, DrawingSubState  # noqa: E402
+from vision.gesture_state_machine import GestureMode, DrawingSubState, ColorExtractionSubState  # noqa: E402
 
 # ── DeepSeek API 配置 ──
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
@@ -894,7 +894,7 @@ class IntegratedServer:
                 print(f"  [Postcard] 失败: {e}")
 
             # ── 等待 20s 后自动重置 ──
-            time.sleep(20.0)
+            time.sleep(10.0)
 
         except Exception as e:
             logger.error(f"Character pipeline 异常: {e}")
@@ -933,176 +933,143 @@ class IntegratedServer:
         })
 
     def _on_object_color_detected(self):
-        """物件颜色检测"""
-        _debug_log.info(f"COLOR_DETECT_CALLBACK | frame_ok={'YES' if self._current_frame is not None else 'NO'} | detector_ok={'YES' if self.object_color_detector is not None else 'NO'}")
-        print("  [FSM] 触发物件颜色检测")
-        if self.object_color_detector is None or self._current_frame is None:
-            self._send_main({
-                "type": "object_color_failed",
-                "message": "无法读取画面，让我看看今天的你。"
-            })
-            self.fsm.trigger_object_color_detected(False)
+        """IP摄像头 → 取画面中心区域的平均颜色作为第一个颜色（失败则随机）"""
+        import random as _random
+        _fallback = ["朱红","灯橙","梨黄","叶绿","瓷青","海蓝","烟紫","枫红","暖橙","藤黄","玉绿","石青","澄蓝","影紫","桃红","夕橙","桂黄","茶绿","湖青","沧蓝","黛紫","墨色"]
+        _debug_log.info(f"COLOR_DETECT_CALLBACK | frame_ok={'YES' if self._current_frame is not None else 'NO'}")
+        print("  [FSM] IP摄像头取中心颜色")
+
+        if self._current_frame is None:
+            # 无画面 → 随机
+            pick = _random.choice([c for c in _fallback if c not in self._collected_colors] or _fallback)
+            self._collected_colors.append(pick)
+            self.current_color = pick
+            self._send_main({"type": "object_color_detected", "color": pick, "confidence": 0.5, "source": "object",
+                "message": f"摄像头未就绪，让{pick}替你开始。"})
+            self.fsm.trigger_object_color_detected(False)  # → 衣物颜色
             return
 
         try:
             frame = self._current_frame
-            region = self.object_color_detector.detect_dominant_region(frame)
-            if region is None:
-                _debug_log.info(f"COLOR_RESULT | stage=dominant_region | result=NO_REGION")
-                print("  → 未检测到显著颜色区域")
-                self._send_main({
-                    "type": "object_color_failed",
-                    "message": "这件物品的颜色太安静了，它没有进入这座书院的色谱。"
-                })
-                self.fsm.trigger_object_color_detected(False)
-                return
+            h, w = frame.shape[:2]
+            # 取中心 30% 区域
+            cx, cy = w // 2, h // 2
+            rw, rh = int(w * 0.15), int(h * 0.15)
+            x1, y1 = cx - rw, cy - rh
+            x2, y2 = cx + rw, cy + rh
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w, x2), min(h, y2)
+            roi = frame[y1:y2, x1:x2]
+            if roi.size == 0:
+                raise ValueError("ROI empty")
 
-            result = self.object_color_detector.detect(frame, region)
-            if result is None:
-                _debug_log.info(f"COLOR_RESULT | stage=color_match | result=NO_MATCH")
-                print("  → 物件颜色未匹配六色")
-                self._send_main({
-                    "type": "object_color_failed",
-                    "message": "这件物品的颜色太安静了，它没有进入这座书院的色谱。"
-                })
-                self.fsm.trigger_object_color_detected(False)
-                return
+            # 平均 BGR → HSV
+            avg_bgr = roi.mean(axis=0).mean(axis=0)
+            import numpy as np
+            bgr_3d = np.uint8([[avg_bgr]])
+            hsv = cv2.cvtColor(bgr_3d, cv2.COLOR_BGR2HSV)[0, 0]
+            hue, sat, val = int(hsv[0]), int(hsv[1]), int(hsv[2])
 
-            # 匹配成功 → 收集颜色，需要两种不同颜色才确认
-            color_name = result.color_name
-            _debug_log.info(f"COLOR_RESULT | stage=match | result=OK | color={color_name} | conf={result.confidence:.2f}")
-            print(f"  → 物件颜色: {color_name} (置信度: {result.confidence:.2f})")
-
-            if color_name in self._collected_colors:
-                # 同色 → 提示换一个
-                self._send_main({
-                    "type": "object_color_detected",
-                    "color": color_name,
-                    "confidence": round(result.confidence, 3),
-                    "source": "object",
-                    "message": f"又看到了{color_name}。请换一件不同颜色的随身之物。",
-                })
-                # 回到等待状态
-                self.fsm.color_extraction_sub = ColorExtractionSubState.AWAITING_OBJECT
-                return
-
-            self._collected_colors.append(color_name)
-            if len(self._collected_colors) == 1:
-                # 第一种颜色 → 提示放第二件
-                self.current_color = color_name
-                self._send_main({
-                    "type": "object_color_detected",
-                    "color": color_name,
-                    "confidence": round(result.confidence, 3),
-                    "source": "object",
-                    "message": f"我捕捉到了一抹{color_name}。请将另一件随身之物靠近光中。",
-                })
-                # 回到等待状态，等第二件
-                self.fsm.color_extraction_sub = ColorExtractionSubState.AWAITING_OBJECT
+            # HSV → 六色匹配
+            # 0-180 OpenCV hue: 红0/180, 橙11-25, 黄26-34, 绿35-85, 蓝86-125, 紫126-155
+            if sat < 40 or val < 40:
+                matched = "墨色"
+            elif hue <= 10 or hue >= 170:
+                matched = "朱红"
+            elif 11 <= hue <= 25:
+                matched = "灯橙"
+            elif 26 <= hue <= 34:
+                matched = "梨黄"
+            elif 35 <= hue <= 85:
+                matched = "叶绿"
+            elif 86 <= hue <= 125:
+                matched = "瓷青"
             else:
-                # 第二种颜色 → 确认两色，进入 GLOBAL
-                self._send_main({
-                    "type": "object_color_detected",
-                    "color": color_name,
-                    "confidence": round(result.confidence, 3),
-                    "source": "object",
-                    "message": f"又见{color_name}。两色相遇，这座书院的颜色有了轮廓。",
-                })
-                # current_color 保持第一个颜色
-                self.fsm.trigger_color_confirmed()
+                matched = "烟紫"
+
+            _debug_log.info(f"COLOR_RESULT | center_avg | BGR=({avg_bgr[0]:.0f},{avg_bgr[1]:.0f},{avg_bgr[2]:.0f}) HSV=({hue},{sat},{val}) | match={matched}")
+            print(f"  → IP中心色: HSV({hue},{sat},{val}) → {matched}")
+
+            if matched in self._collected_colors:
+                # 同色 → 换一个随机色
+                available = [c for c in _fallback if c not in self._collected_colors]
+                matched = _random.choice(available or _fallback)
+
+            self._collected_colors.append(matched)
+            self.current_color = matched
+            self._send_main({"type": "object_color_detected", "color": matched, "confidence": 0.7, "source": "object",
+                "message": f"我捕捉到了一抹{matched}。"})
+            self.fsm.trigger_object_color_detected(False)  # → 衣物颜色
         except Exception as e:
-            print(f"  → 物件颜色检测异常: {e}")
-            self._send_main({
-                "type": "object_color_failed",
-                "message": "让我看看今天的你。"
-            })
-            self.fsm.trigger_object_color_detected(False)
+            print(f"  → IP中心色检测异常: {e}")
+            pick = _random.choice([c for c in _fallback if c not in self._collected_colors] or _fallback)
+            self._collected_colors.append(pick)
+            self.current_color = pick
+            self._send_main({"type": "object_color_failed",
+                "message": f"让我看看……让{pick}替你开始。"})
+            self.fsm.trigger_object_color_detected(False)  # → 衣物颜色
 
     def _on_clothing_fallback(self):
-        """衣物兜底 — 电脑摄像头真检测，失败则随机"""
+        """电脑摄像头 → 检测衣物颜色作为第二个颜色（失败则随机）"""
         import random as _random
-        _fallback_colors = ["朱红","灯橙","梨黄","叶绿","瓷青","海蓝","烟紫","枫红","暖橙","藤黄","玉绿","石青","澄蓝","影紫","桃红","夕橙","桂黄","茶绿","湖青","沧蓝","黛紫"]
-        print("  [FSM] 触发衣物兜底")
+        _fallback = ["朱红","灯橙","梨黄","叶绿","瓷青","海蓝","烟紫","枫红","暖橙","藤黄","玉绿","石青","澄蓝","影紫","桃红","夕橙","桂黄","茶绿","湖青","沧蓝","黛紫","墨色"]
+        print("  [FSM] 电脑摄像头取色")
 
-        if self.webcam_color_detector is None:
-            pick = _random.choice(_fallback_colors)
-            print(f"  → WebcamColorDetector 未就绪，随机选择: {pick}")
-            self.current_color = pick
-            self._send_main({
-                "type": "clothing_color_failed",
-                "message": f"今天的你，颜色也不愿被命名。那就让{pick}替你开始吧。"
-            })
-            self.fsm.trigger_clothing_color_detected(False)
-            return
+        color_name = None
+        if self.webcam_color_detector is not None:
+            try:
+                webcam_frame = self.webcam_color_detector.read_frame()
+                if webcam_frame is not None:
+                    color_name, confidence = self.webcam_color_detector.detect(webcam_frame)
+                    if color_name:
+                        _debug_log.info(f"WEBCAM_RESULT | color={color_name} | conf={confidence:.2f}")
+                        print(f"  → 衣物颜色: {color_name} (置信度: {confidence:.2f})")
+            except Exception as e:
+                print(f"  → 电脑摄像头检测异常: {e}")
 
-        # 获取衣物检测帧：优先用独立摄像头，否则用主摄像头当前帧
-        webcam_frame = None
-        if self.webcam is not None and self.webcam.isOpened():
-            for _ in range(3):
-                ret, f = self.webcam.read()
-                if ret and f is not None:
-                    webcam_frame = f
-                    break
-        elif self._current_frame is not None:
-            webcam_frame = self._current_frame
+        if color_name is None:
+            # 检测失败 → 随机
+            available = [c for c in _fallback if c not in self._collected_colors]
+            color_name = _random.choice(available or _fallback)
+            print(f"  → 衣物颜色随机: {color_name}")
 
-        if webcam_frame is None:
-            pick = _random.choice(_fallback_colors)
-            print(f"  → 衣物摄像头不可用，随机选择: {pick}")
-            self.current_color = pick
-            self._send_main({
-                "type": "clothing_color_failed",
-                "message": f"今天的你，颜色也不愿被命名。那就让{pick}替你开始吧。"
-            })
-            self.fsm.trigger_clothing_color_detected(False)
-            return
+        if color_name in self._collected_colors:
+            available = [c for c in _fallback if c not in self._collected_colors]
+            color_name = _random.choice(available or _fallback)
 
-        try:
-            color_name, confidence = self.webcam_color_detector.detect(webcam_frame)
-            if color_name is None:
-                pick = _random.choice(_fallback_colors)
-                print(f"  → 衣物颜色未匹配六色，随机选择: {pick}")
-                self.current_color = pick
-                self._send_main({
-                    "type": "clothing_color_failed",
-                    "message": "今天的你，颜色也不愿被命名。"
-                })
-                self.fsm.trigger_clothing_color_detected(False)
-                return
-
-            self.current_color = color_name
-            _debug_log.info(f"COLOR_RESULT | stage=clothing_match | result=OK | color={color_name} | conf={confidence:.2f} | AUTO_CONFIRM")
-            print(f"  → 衣物颜色: {color_name} (置信度: {confidence:.2f}) → 自动确认")
-            self._send_main({
-                "type": "clothing_color_detected",
-                "color": color_name,
-                "confidence": round(confidence, 3),
-                "source": "clothing",
-                "message": f"那我看看今天的你。你今天穿着{color_name}。也许这就是你此刻的底色。"
-            })
-            # 直接确认，跳过二次握拳
-            self.fsm.trigger_color_confirmed()
-        except Exception as e:
-            print(f"  → 衣物颜色检测异常: {e}，使用默认墨色")
-            self.current_color = "墨色"
-            self._send_main({
-                "type": "clothing_color_failed",
-                "message": "有些颜色，不急着被命名。那就让墨色替你开始吧。"
-            })
-            self.fsm.trigger_clothing_color_detected(False)
+        self._collected_colors.append(color_name)
+        self._send_main({
+            "type": "clothing_color_detected",
+            "color": color_name,
+            "confidence": 0.7,
+            "source": "clothing",
+            "message": f"两色相遇，{self._collected_colors[0]}与{color_name}，这座书院的颜色有了轮廓。",
+        })
+        self.fsm.trigger_color_confirmed()
 
     def _on_color_confirmed(self):
         """颜色确认"""
-        color = self.current_color or "岳麓绿"
         self._color_done = True  # 允许自动绘画
-        _debug_log.info(f"COLOR_CONFIRMED | color={color} | fsm_mode={self.fsm.mode.value}")
-        print(f"  [FSM] 颜色已确认: {color}")
+        colors = list(self._collected_colors) if self._collected_colors else [self.current_color or "岳麓绿"]
+        _debug_log.info(f"COLOR_CONFIRMED | colors={colors} | fsm_mode={self.fsm.mode.value}")
+        print(f"  [FSM] 颜色已确认: {colors}")
+        # 发送第一个颜色确认
+        c0 = colors[0] if colors else "岳麓绿"
         self._send_main({
             "type": "color_confirmed",
-            "color": color,
-            "message": f"我看到了……你的颜色是{color}。",
+            "color": c0,
+            "colors": colors,
+            "message": f"我看到了……你的颜色是{c0}。",
         })
-        # 如果之前已经因为兜底到了 GLOBAL，不需要再次发送
+        # 如果有第二个颜色，也发送
+        if len(colors) >= 2:
+            self._send_main({
+                "type": "clothing_color_detected",
+                "color": colors[1],
+                "confidence": 0.7,
+                "source": "clothing",
+                "message": f"两色相遇，{colors[0]}与{colors[1]}，这座书院的颜色有了轮廓。",
+            })
         if self.fsm and self.fsm.mode.value == "GLOBAL":
             return
 
