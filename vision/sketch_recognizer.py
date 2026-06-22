@@ -157,7 +157,7 @@ class RecognizerConfig:
     """识别器配置"""
     raster_size: int = 28              # 栅格化尺寸
     stroke_width: float = 2.0          # 笔画宽度（像素）
-    min_trajectory_points: int = 5     # 最少轨迹点数
+    min_trajectory_points: int = 3     # 最少轨迹点数
     normalize_padding: float = 0.1     # 归一化边距比例
     top_k: int = 3                     # 返回候选数
     model_path: str = ""               # ONNX 模型路径（空则用启发式降级）
@@ -398,15 +398,15 @@ class HeuristicPredictor:
     实际部署时替换为 ONNX 模型推理。
     """
 
-    # 特征 → QuickDraw 类别映射
+    # 特征 → QuickDraw 类别映射（只使用 QUICKDRAW_TO_OBJECT 中存在的类别）
     FEATURE_CATEGORIES = {
-        "vertical_line":   ["tree", "tower", "pencil", "line"],
-        "horizontal_line": ["river", "road", "bridge", "line"],
+        "vertical_line":   ["tree", "lighthouse", "pencil", "line"],
+        "horizontal_line": ["river", "bridge", "line", "sailboat"],
         "circle":          ["sun", "clock", "face", "circle", "pond"],
         "triangle":        ["mountain", "triangle", "house"],
         "rectangle":       ["house", "book", "square", "door"],
-        "curve":           ["river", "cloud", "mountain", "snake"],
-        "zigzag":          ["stairs", "zigzag", "lightning"],
+        "curve":           ["river", "cloud", "mountain", "ocean"],
+        "zigzag":          ["stairs", "zigzag", "mountain"],
         "complex":         ["house", "castle", "tree", "flower"],
     }
 
@@ -463,7 +463,7 @@ class HeuristicPredictor:
         # 低闭合 + 高>宽 → 竖线/树/塔
         elif aspect_ratio < 0.5 and direction_changes < 5:
             probs["tree"] = 0.35 + jitter()
-            probs["tower"] = 0.25 + jitter()
+            probs["lighthouse"] = 0.25 + jitter()
             probs["line"] = 0.2 + jitter()
             probs["pencil"] = 0.15 + jitter()
         # 多方向变化 + 低闭合 → 锯齿/楼梯/山
@@ -493,7 +493,7 @@ class HeuristicPredictor:
             probs["river"] = 0.3 + jitter()
             probs["cloud"] = 0.25 + jitter()
             probs["mountain"] = 0.25 + jitter()
-            probs["snake"] = 0.15 + jitter()
+            probs["ocean"] = 0.15 + jitter()
         # 默认
         else:
             probs["house"] = 0.18 + jitter()

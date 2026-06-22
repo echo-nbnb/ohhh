@@ -608,10 +608,30 @@ class IntegratedServer:
             else:
                 # 识别结果为空 → 兜底随机物象
                 import random as _r
-                _fallback = [("古树", 0.35, "tree"), ("书卷", 0.30, "book"),
-                             ("石阶", 0.28, "stairs"), ("林荫道", 0.25, "tree"),
-                             ("岳麓书院", 0.32, "house"), ("爱晚亭", 0.26, "castle")]
-                name, score, qd_cat = _r.choice(_fallback)
+                _all = ["东方红广场","中国书院博物馆","书卷","书架","书案","匾额",
+                        "古树","古籍","图书馆","墨锭","学位帽","实验室","屋脊","山石",
+                        "岳麓书院","岳麓山","操场","教学楼","显微镜","林荫道",
+                        "校徽","校门","楹联","毛笔","湖南大学大礼堂","湘江","爱晚亭",
+                        "牌楼路","白鹤泉","石桥","石阶","砚台","碑刻","窗格",
+                        "竹林","竹简","笔记本","线装书","经卷","自卑亭",
+                        "荣誉证书","讲堂","设计院楼","赫曦台","长廊","院墙",
+                        "麓山南路","黑板"]
+                name = _r.choice(_all)
+                _qd_fb = {"古树":"tree","书卷":"book","石阶":"stairs","岳麓书院":"house",
+                          "湘江":"river","爱晚亭":"castle","石桥":"bridge","竹林":"bush",
+                          "林荫道":"tree","讲堂":"church","图书馆":"house","实验室":"computer",
+                          "岳麓山":"mountain","白鹤泉":"pond","校门":"door","院墙":"fence",
+                          "长廊":"fence","屋脊":"umbrella","窗格":"hexagon","碑刻":"diamond",
+                          "匾额":"face","校徽":"circle","东方红广场":"square","学位帽":"hat",
+                          "设计院楼":"house","教学楼":"house","赫曦台":"castle",
+                          "中国书院博物馆":"house","自卑亭":"house","操场":"baseball",
+                          "山石":"mountain","墨锭":"coffee cup","砚台":"cup","毛笔":"pencil",
+                          "笔记本":"pencil","书架":"backpack","书案":"basket","古籍":"book",
+                          "线装书":"book","经卷":"book","竹简":"book","显微镜":"binoculars",
+                          "楹联":"door","荣誉证书":"envelope","牌楼路":"stairs",
+                          "麓山南路":"stairs","湖南大学大礼堂":"church","黑板":"television"}
+                qd_cat = _qd_fb.get(name, "tree")
+                score = round(_r.uniform(0.25, 0.35), 2)
                 self.fsm._recognized_object = (name, score, qd_cat)
                 self._send_main({"type": "object_recognized", "color": self.current_color,
                     "object": {"name": name, "score": round(score, 4), "qd_category": qd_cat}})
@@ -620,17 +640,39 @@ class IntegratedServer:
                 self._on_object_confirmed(name, score, qd_cat)
 
     def _on_drawing_cancel(self):
+        """绘画取消 → 回到全局等待重新画"""
         print("  [FSM] 绘画取消")
         self.fsm._recognized_object = None
         self._pending_trajectory = []
         self._send_main({
             "type": "drawing_cancelled",
-            "message": "没关系。有些图像，需要再画一次才会清晰。"
+            "message": ""
         })
         self._send_gesture_state()
 
     def _on_object_confirmed(self, name: str, score: float, qd_cat: str):
         """物象确认 → 第一轮回GLOBAL等第二轮，第二轮才触发人物推荐"""
+        # 重名检测：如果和已有物象相同，随机换一个
+        if name in self.selected_objects:
+            import random as _r
+            _all = ["东方红广场","中国书院博物馆","书卷","书架","书案","匾额",
+                    "古树","古籍","图书馆","墨锭","学位帽","实验室","屋脊","山石",
+                    "岳麓书院","岳麓山","操场","教学楼","显微镜","林荫道",
+                    "校徽","校门","楹联","毛笔","湖南大学大礼堂","湘江","爱晚亭",
+                    "牌楼路","白鹤泉","石桥","石阶","砚台","碑刻","窗格",
+                    "竹林","竹简","笔记本","线装书","经卷","自卑亭",
+                    "荣誉证书","讲堂","设计院楼","赫曦台","长廊","院墙",
+                    "麓山南路","黑板"]
+            _others = [n for n in _all if n not in self.selected_objects]
+            new_name = _r.choice(_others) if _others else _r.choice(_all)
+            print(f"  [FSM] 物象重名 {name} → 替换为 {new_name}")
+            # 通知前端用新名字的图片
+            self._send_main({
+                "type": "object_recognized",
+                "color": self.current_color,
+                "object": {"name": new_name, "score": 0.35, "qd_category": "fallback"}
+            })
+            name = new_name
         print(f"  [FSM] 物象已确认: {name} ({score:.2f})")
         self.selected_objects.append(name)
         if self._pending_trajectory:
@@ -1157,19 +1199,33 @@ class IntegratedServer:
                     self._hand_lost_frames += 1
                     if self._hand_lost_frames == 1:
                         print(f"  [Auto] 开始计数: is_drawing={self.fsm.is_drawing} sub={self.fsm.drawing_sub} traj={len(self.fsm.trajectory)}")
-                    if self._hand_lost_frames >= 90:
+                    if self._hand_lost_frames >= 30:
                         if len(self.fsm.trajectory) >= 10:
-                            print(f"  [Auto-Commit] 手部消失3秒提交，轨迹点={len(self.fsm.trajectory)}")
+                            print(f"  [Auto-Commit] 手部消失1秒提交，轨迹点={len(self.fsm.trajectory)}")
                             traj = list(self.fsm.trajectory)
                             self._on_drawing_commit(traj)
                             self.fsm.trajectory.clear()
                             self.fsm._transition_to(GestureMode.GLOBAL, "IDLE")
                         else:
-                            print(f"  [Auto-Cancel] 轨迹点不足 ({len(self.fsm.trajectory)})，取消绘画")
+                            print(f"  [Auto-Cancel] 轨迹点不足 ({len(self.fsm.trajectory)})，随机兜底")
                             self.fsm.trajectory.clear()
                             self.fsm._transition_to(GestureMode.GLOBAL, "IDLE")
-                            self._send_main({"type": "drawing_cancelled",
-                                             "message": "没关系。有些图像，需要再画一次才会清晰。"})
+                            import random as _r
+                            _all = ["东方红广场","中国书院博物馆","书卷","书架","书案","匾额",
+                                    "古树","古籍","图书馆","墨锭","学位帽","实验室","屋脊","山石",
+                                    "岳麓书院","岳麓山","操场","教学楼","显微镜","林荫道",
+                                    "校徽","校门","楹联","毛笔","湖南大学大礼堂","湘江","爱晚亭",
+                                    "牌楼路","白鹤泉","石桥","石阶","砚台","碑刻","窗格",
+                                    "竹林","竹简","笔记本","线装书","经卷","自卑亭",
+                                    "荣誉证书","讲堂","设计院楼","赫曦台","长廊","院墙",
+                                    "麓山南路","黑板"]
+                            name = _r.choice(_all)
+                            self._send_main({
+                                "type": "object_recognized",
+                                "color": self.current_color,
+                                "object": {"name": name, "score": 0.35, "qd_category": "fallback"}
+                            })
+                            self._on_object_confirmed(name, 0.35, "fallback")
                         self._hand_lost_frames = 0
                 # ── 无手部帧日志（每60帧一次）──
                 if self.frame_count - _last_log_frame >= 60:
@@ -1318,7 +1374,8 @@ class _DirectSketchBridge:
         try:
             results = self.recognizer.recognize_from_fingertip_history(trajectory, color=color)
             if not results:
-                return []
+                # 识别为空 → 从全部 48 物象中随机兜底
+                return self._random_fallback()
             return [
                 {"name": r.entity_name, "score": round(r.score, 4),
                  "qd_category": r.qd_category}
@@ -1326,12 +1383,40 @@ class _DirectSketchBridge:
             ]
         except Exception as e:
             logger.error(f"SketchBridge 识别失败: {e}")
-            # 降级：返回假候选
-            return [
-                {"name": "古树", "score": 0.88, "qd_category": "tree"},
-                {"name": "岳麓书院", "score": 0.72, "qd_category": "house"},
-                {"name": "石阶", "score": 0.55, "qd_category": "stairs"},
-            ]
+            return self._random_fallback()
+
+    def _random_fallback(self) -> List[Dict]:
+        """从 48 物象中随机选 3 个作为兜底"""
+        import random as _r
+        all_objects = [
+            "东方红广场","中国书院博物馆","书卷","书架","书案","匾额",
+            "古树","古籍","图书馆","墨锭","学位帽","实验室","屋脊","山石",
+            "岳麓书院","岳麓山","操场","教学楼","显微镜","林荫道",
+            "校徽","校门","楹联","毛笔","湖南大学大礼堂","湘江","爱晚亭",
+            "牌楼路","白鹤泉","石桥","石阶","砚台","碑刻","窗格",
+            "竹林","竹简","笔记本","线装书","经卷","自卑亭",
+            "荣誉证书","讲堂","设计院楼","赫曦台","长廊","院墙",
+            "麓山南路","黑板",
+        ]
+        picked = _r.sample(all_objects, min(3, len(all_objects)))
+        qd_map = {"古树":"tree","书卷":"book","石阶":"stairs","岳麓书院":"house",
+                  "湘江":"river","爱晚亭":"castle","石桥":"bridge","竹林":"bush",
+                  "林荫道":"tree","讲堂":"church","图书馆":"house","实验室":"computer",
+                  "岳麓山":"mountain","白鹤泉":"pond","校门":"door","院墙":"fence",
+                  "长廊":"fence","屋脊":"umbrella","窗格":"hexagon","碑刻":"diamond",
+                  "匾额":"face","校徽":"circle","东方红广场":"square","学位帽":"hat",
+                  "设计院楼":"house","教学楼":"house","赫曦台":"castle",
+                  "中国书院博物馆":"house","自卑亭":"house","操场":"baseball",
+                  "山石":"mountain","墨锭":"coffee cup","砚台":"cup","毛笔":"pencil",
+                  "笔记本":"pencil","书架":"backpack","书案":"basket","古籍":"book",
+                  "线装书":"book","经卷":"book","竹简":"book","显微镜":"binoculars",
+                  "楹联":"door","荣誉证书":"envelope","牌楼路":"stairs",
+                  "麓山南路":"stairs","湖南大学大礼堂":"church","黑板":"television"}
+        return [
+            {"name": n, "score": round(0.7 - i * 0.2, 2),
+             "qd_category": qd_map.get(n, "tree")}
+            for i, n in enumerate(picked)
+        ]
 
 
 class _DirectCharacterBridge:
