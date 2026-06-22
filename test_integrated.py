@@ -348,25 +348,19 @@ class IntegratedServer:
 
                 self.main_client = client
 
-                # 只在空闲状态才重置，流程进行中则保持当前状态
+                # 完整重置：每次新连接都从头开始
+                self._color_done = False
+                self._pipeline_running = False
+                self._hand_lost_frames = 0
+                self._waiting_for_screenshot = False
+                self.selected_objects.clear()
+                self.sketch_trajectories.clear()
+                self._pending_trajectory = []
+                self.fsm._recognized_object = None
                 if self.fsm:
-                    current_mode = self.fsm.mode.value
-                    if current_mode == "COLOR_EXTRACTION" and not self._color_done:
-                        # 空闲 → 安全重置
-                        self.selected_objects.clear()
-                        self.sketch_trajectories.clear()
-                        self._pending_trajectory = []
-                        self.fsm._recognized_object = None
-                        self.fsm.reset_to_global()
-                        self.fsm.trigger_color_extraction_start()
-                        _debug_log.info("STATE_RESET | 新客户端连接（空闲），重置回 COLOR_EXTRACTION")
-                    else:
-                        # 流程进行中 → 保持状态，只同步给新前端
-                        _debug_log.info(f"STATE_KEEP | 流程进行中 mode={current_mode}，保持当前状态")
-                else:
-                    self.selected_objects.clear()
-                    self.sketch_trajectories.clear()
-                    self._pending_trajectory = []
+                    self.fsm.reset_to_global()
+                    self.fsm.trigger_color_extraction_start()
+                _debug_log.info("STATE_RESET | 新客户端连接，完整重置回 COLOR_EXTRACTION")
 
                 self._send_main({"type": "connected",
                                  "message": "integrated_server_ready"})
