@@ -66,7 +66,10 @@
       "Bash(git reset *)",
       "Bash(git commit *、)",
       "Bash(git commit *)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(cp test_integrated.py /tmp/tibak.py)",
+      "Bash(sed -i 's/\"sk-[^\"]*\"/\"\"/' test_integrated.py)",
+      "Bash(cp /tmp/tibak.py test_integrated.py)"
     ]
   }
 }

@@ -117,6 +117,15 @@ export default function App() {
   const [act3Overlay, setAct3Overlay] = useState(null);    // Act3 canvas screenshot for overlay
   const postcardEnterTimeRef = useRef(0);    // when Act5 was entered
 
+  // ── Act2 颜色检测状态 ──
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [colorRound, setColorRound] = useState(1);       // 当前第几色
+  const [firstColor, setFirstColor] = useState(null);     // {hex, name}
+  const [secondColor, setSecondColor] = useState(null);   // {hex, name}
+  const [stableColorName, setStableColorName] = useState(null);
+  const [stableSeconds, setStableSeconds] = useState(0);
+  const confirmSeconds = 3;
+
   const timersRef = useRef([]);
   const latestRef = useRef({ mode, colors, objectResult, matchedCharacter, narrative, imageryItems });
   const colorsRef = useRef(colors);
@@ -134,6 +143,31 @@ export default function App() {
   const resetCooldownUntil = useRef(0);      // ignore gestures/colors until timestamp
   const remoteDrawRef = useRef(null);         // direct canvas draw callback (bypass React)
   const colorConfirmedRef = useRef(false);     // 后端确认颜色后才允许进入 Act3
+
+  // ── 键盘控制 ──
+  // R = 检测颜色（Act2），Space = 推进下一幕
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.target.tagName === "INPUT") return;
+      const s = stageRef.current;
+      // R 键: 触发后端真实颜色检测，检测两次完成择色
+      if (e.code === "KeyR" && s === STAGES.COLOR) {
+        e.preventDefault();
+        wsSend({type: "trigger_color_detect"});
+        addLog("触发颜色检测...");
+        return;
+      }
+      // Space: 推进
+      if (e.code !== "Space") return;
+      e.preventDefault();
+      if (s === STAGES.INTRO || s === STAGES.TRANSITION) goToColor();
+      else if (s === STAGES.COLOR) { colorConfirmedRef.current = true; goToDraw(); }
+      else if (s === STAGES.DRAW) goToSpirit();
+      else if (s === STAGES.SPIRIT) goToPostcard();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => { colorsRef.current = colors; }, [colors]);
 
@@ -269,6 +303,9 @@ export default function App() {
     setPoints([]); setObjectResult(null); setImageryItems([]);
     setMatchedCharacter(null); setSpiritStatus("idle"); setNarrative(null);
     setIsAutoAdvancing(false); setColorStep(1); setWaitingForStamp(false);
+    setIsDetecting(false); setColorRound(1);
+    setFirstColor(null); setSecondColor(null);
+    setStableColorName(null); setStableSeconds(0);
     fistTriggeredRef.current = false; colorLockedRef.current = false;
     colorConfirmedRef.current = false;
     liveObjectCountRef.current = 0;
@@ -328,24 +365,65 @@ export default function App() {
     const message = normalizeBackendMessage(payload);
     if (!message) return;
     switch (message.type) {
+      case MESSAGE_TYPES.COLOR_DETECTION_ACTIVE:
+        setIsDetecting(true);
+        setStableColorName(null);
+        setStableSeconds(0);
+        setColorRound(message.round || 1);
+        break;
+
+      case MESSAGE_TYPES.COLOR_DETECT_PROGRESS:
+        if (message.round) setColorRound(message.round);
+        setStableColorName(message.stableColor || null);
+        setStableSeconds(message.elapsed || 0);
+        break;
+
       case MESSAGE_TYPES.COLOR_DETECTED:
-        // Cooldown after reset: ignore rapid color messages
         if (Date.now() < resetCooldownUntil.current) break;
-        // 颜色确认 → 允许进入 Act3
+
+        // ── 新 Act2 两色流程 ──
+        if (message.source === "object" || message.source === "clothing") {
+          const found = findColor(message.colorName);
+          const round = message.round || 1;
+          if (!found) break;
+
+          if (round === 1) {
+            setFirstColor({ hex: found.hex, name: found.name });
+            setIsDetecting(false);  // 停检测，等用户再按 R
+            setColors([found]);
+            addLog(`第一色完成：${found.name}，等待第二色…`);
+          } else {
+            setSecondColor({ hex: found.hex, name: found.name });
+            setIsDetecting(false);
+            setColors(prev => [...prev, found]);
+            colorConfirmedRef.current = true;
+            addLog(`第二色完成：${found.name}，两色齐备`);
+          }
+          break;
+        }
+
+        // ── 旧流程兼容（仅在两色均未通过新流程确认时才运行）──
         if (message.source === "confirmed") {
           colorConfirmedRef.current = true;
+          // 新流程已设置好两色 → 只需要推进到 Act3
+          if (secondColor) {
+            if (stageRef.current === STAGES.COLOR) {
+              setTimeout(() => goToDraw(), 500);
+            }
+            break;
+          }
           if (stageRef.current === STAGES.COLOR) {
             setTimeout(() => goToDraw(), 500);
           }
         }
+        // 新流程已处理过一轮以上 → 不要再让旧流程改颜色
+        if (firstColor) break;
         // Only process color when on COLOR or DRAW stage or later (not during Act1)
         if (stageRef.current === STAGES.INTRO || stageRef.current === STAGES.TRANSITION) {
-          // Cache color silently with dedup+fallback
           const detected = findColor(message.colorName);
           setColors(prev => {
             if (prev.length >= 2) return prev;
             if (!prev.some(c => c.name === detected.name)) return [...prev, detected];
-            // Same color — pick different fallback
             const allColors = ["岳麓绿","书院红","湘江蓝","西迁黄","校徽金","墨色"];
             const unused = allColors.filter(n => n !== detected.name && !prev.some(c => c.name === n));
             const fbName = unused[Math.floor(Math.random() * unused.length)];
@@ -354,7 +432,6 @@ export default function App() {
           });
           break;
         }
-        // Process normally if already on Act2+
         if (colors.length < 2) {
           applyColorResult(findColor(message.colorName), message.source, message.confidence);
         }
@@ -525,13 +602,15 @@ export default function App() {
       case STAGES.COLOR:
         return (
           <Act2ColorSeeking
-            step={colorStep}
-            recognizedColors={actualColors.map(c => c.hex)}
-            copyByStep={buildAct2CopyByStep(actualColors)}
-            autoDemo={false}
-            stepDuration={6000}
+            round={colorRound}
+            firstColor={firstColor}
+            secondColor={secondColor}
+            isDetecting={isDetecting}
+            stableColorName={stableColorName}
+            stableSeconds={stableSeconds}
+            confirmSeconds={confirmSeconds}
             onComplete={goToDraw}
-            completeDelay={4000}
+            completeDelay={2000}
           />
         );
 

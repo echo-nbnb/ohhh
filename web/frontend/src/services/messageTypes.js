@@ -1,6 +1,8 @@
 // 前端内部事件类型
 export const MESSAGE_TYPES = Object.freeze({
   COLOR_DETECTED: "color_detected",
+  COLOR_DETECTION_ACTIVE: "color_detection_active",
+  COLOR_DETECT_PROGRESS: "color_detect_progress",
   GESTURE_STATE: "gesture_state",
   DRAWING_POINT: "drawing_point",
   OBJECT_RECOGNIZED: "object_recognized",
@@ -27,6 +29,8 @@ export const SUPPORTED_MESSAGE_TYPES = new Set([
   "object_color_failed",
   "clothing_color_failed",
   "color_confirmed",
+  "color_detection_active",
+  "color_detect_progress",
   "drawing_start",
   "drawing_cancelled",
   "object_recognized",

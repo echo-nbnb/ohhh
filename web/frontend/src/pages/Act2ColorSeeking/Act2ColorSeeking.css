@@ -198,6 +198,207 @@
   }
 }
 
+/* ── 检测框 ── */
+.act2__detectBox {
+  position: absolute;
+  inset: 15%;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.act2__detectBox--active {
+  pointer-events: auto;
+}
+
+.act2__detectBoxInner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 四角 */
+.act2__detectCorner {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-color: rgba(180, 180, 170, 0.5);
+  border-style: solid;
+  border-width: 0;
+  transition: all 0.5s ease;
+}
+.act2__detectCorner--tl { top: 0; left: 0; border-top-width: 2px; border-left-width: 2px; }
+.act2__detectCorner--tr { top: 0; right: 0; border-top-width: 2px; border-right-width: 2px; }
+.act2__detectCorner--bl { bottom: 0; left: 0; border-bottom-width: 2px; border-left-width: 2px; }
+.act2__detectCorner--br { bottom: 0; right: 0; border-bottom-width: 2px; border-right-width: 2px; }
+
+/* 检测中：黄框 */
+.act2__detectBox--active .act2__detectCorner {
+  border-color: rgba(220, 200, 60, 0.8);
+  width: 28px;
+  height: 28px;
+}
+.act2__detectBox--stable .act2__detectCorner {
+  border-color: rgba(240, 210, 20, 0.95);
+  width: 32px;
+  height: 32px;
+}
+
+/* 已确认：绿框 */
+.act2__detectBox--confirmed .act2__detectCorner {
+  border-color: rgba(80, 200, 100, 0.9);
+  width: 26px;
+  height: 26px;
+}
+
+/* 提示 */
+.act2__detectHint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+.act2__detectHintKey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1.5px solid rgba(180, 180, 170, 0.6);
+  border-radius: 6px;
+  color: rgba(160, 160, 150, 0.8);
+  font-family: "SF Mono", "Consolas", monospace;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+.act2__detectHintText {
+  color: rgba(150, 150, 140, 0.8);
+  font-family: "Source Han Serif CN", "Noto Serif SC", serif;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+/* ── 轮次标记 ── */
+.act2__roundBadge {
+  position: absolute;
+  top: -10px;
+  right: -6px;
+  background: rgba(200, 190, 160, 0.85);
+  color: #fff;
+  font-family: "SF Mono", "Consolas", monospace;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  letter-spacing: 0;
+}
+
+/* ── 已确认色块行 ── */
+.act2__swatchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.act2__swatchRow--second {
+  animation: act2SwatchIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.act2__miniSwatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 8px rgba(0,0,0,0.1);
+}
+.act2__miniSwatchCheck {
+  color: #fff;
+  font-size: 11px;
+  text-shadow: 0 0 2px rgba(0,0,0,0.4);
+}
+.act2__miniSwatchName {
+  color: #5a5040;
+  font-family: "Source Han Serif CN", "Noto Serif SC", serif;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ── 两色完成 ── */
+.act2__detectDone {
+  text-align: center;
+}
+.act2__detectDoneText {
+  color: #5a5040;
+  font-family: "Source Han Serif CN", "Noto Serif SC", serif;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  animation: act2TextIn 0.5s ease both;
+}
+.act2__detectBox--done .act2__detectCorner {
+  border-color: rgba(80, 200, 100, 0.9);
+  width: 28px;
+  height: 28px;
+}
+
+/* 检测进度 */
+.act2__detectProgress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.act2__detectLabel {
+  color: #a08830;
+  font-family: "Source Han Serif CN", "Noto Serif SC", serif;
+  font-size: 16px;
+  font-weight: 500;
+}
+.act2__detectLabel--dim {
+  color: rgba(150, 140, 110, 0.7);
+  animation: act2Pulse 1.2s ease-in-out infinite;
+}
+.act2__detectTimer {
+  color: rgba(160, 140, 60, 0.8);
+  font-family: "SF Mono", "Consolas", monospace;
+  font-size: 13px;
+}
+
+/* 确认结果 */
+.act2__detectResult {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.act2__detectSwatch {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  box-shadow: 0 0 24px rgba(0,0,0,0.12);
+  animation: act2SwatchIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.act2__detectName {
+  color: #5a5040;
+  font-family: "Source Han Serif CN", "Noto Serif SC", serif;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  animation: act2TextIn 0.5s ease 0.15s both;
+}
+
+@keyframes act2SwatchIn {
+  from { transform: scale(0); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+@keyframes act2Pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
 @media (max-width: 768px) {
   .act2__center {
     left: 50%;

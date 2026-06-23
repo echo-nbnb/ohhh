@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo } from "react";
 import "./Act2ColorSeeking.css";
 
 import bgUrl from "../../assets/act2/act2-bg.svg";
@@ -13,8 +13,6 @@ function random(min, max) {
 
 function createFloatingIcons(count = 6) {
   const edgeAreas = [
-    { xMin: -8, xMax: 15, yMin: 5, yMax: 95 },
-    { xMin: 85, xMax: 108, yMin: 5, yMax: 95 },
     { xMin: -8, xMax: 15, yMin: 5, yMax: 95 },
     { xMin: 85, xMax: 108, yMin: 5, yMax: 95 },
   ];
@@ -35,13 +33,6 @@ function createFloatingIcons(count = 6) {
   });
 }
 
-const DEFAULT_COPY = {
-  1: ["请将随身之物靠近光中。", "让它替你说话。"],
-  2: ["让我看看……", "这件东西里", "藏着怎样的颜色。"],
-  3: ["一缕明黄浮出光面，", "像旧纸上醒来的日色。"],
-  4: ["明黄与深蓝相遇，", "像山门灯火照见夜色。"],
-};
-
 function hexToNorm(hex) {
   if (!hex || typeof hex !== "string") return [0.5, 0.5, 0.5];
   const clean = hex.replace("#", "");
@@ -52,69 +43,45 @@ function hexToNorm(hex) {
   ];
 }
 
-function blendColors(colors) {
-  if (colors.length === 0) return [0.5, 0.5, 0.5];
-  const norms = colors.map(hexToNorm);
-  return [0, 1, 2].map(i =>
-    norms.reduce((sum, c) => sum + c[i], 0) / norms.length
-  );
-}
-
 export default function Act2ColorSeeking({
-  step: controlledStep,
-  recognizedColors = ["#F2C94C", "#2F5E9E"],
-  copyByStep = DEFAULT_COPY,
-  autoDemo = false,
-  stepDuration = 5000,
+  round = 1,                   // 当前轮次：1 or 2
+  firstColor = null,           // {hex, name}
+  secondColor = null,          // {hex, name}
+  isDetecting = false,
+  stableColorName = null,
+  stableSeconds = 0,
+  confirmSeconds = 3,
   onComplete,
-  completeDelay = 3000,
+  completeDelay = 2000,
 }) {
-  const [internalStep, setInternalStep] = useState(1);
-  const step = controlledStep ?? internalStep;
+  const isDone = secondColor !== null;  // 两色齐备
 
+  // 两色完成 → 自动进入下一幕
   useEffect(() => {
-    if (!autoDemo || controlledStep !== undefined) return;
-    const timer = window.setInterval(() => {
-      setInternalStep((prev) => (prev >= 4 ? 1 : prev + 1));
-    }, stepDuration);
-    return () => window.clearInterval(timer);
-  }, [autoDemo, controlledStep, stepDuration]);
-
-  // Fire onComplete when step 4 is reached
-  const completeTimerRef = useRef(null);
-  useEffect(() => {
-    if (step === 4 && onComplete) {
-      completeTimerRef.current = setTimeout(() => onComplete(), completeDelay);
-    }
-    return () => {
-      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
-    };
-  }, [step, onComplete, completeDelay]);
-
-  const diskColors = useMemo(() => {
-    if (step === 3) {
-      const c0 = recognizedColors[0];
-      return c0 ? [c0] : [];
-    }
-    if (step === 4) {
-      const c0 = recognizedColors[0] || "#F2C94C";
-      const c1 = recognizedColors[1] || c0; // fallback: duplicate first color
-      return [c0, c1];
-    }
-    return [];
-  }, [step, recognizedColors]);
+    if (!isDone || !onComplete) return;
+    const t = setTimeout(() => onComplete(), completeDelay);
+    return () => clearTimeout(t);
+  }, [isDone, onComplete, completeDelay]);
 
   const floatingIcons = useMemo(() => createFloatingIcons(6), []);
-  const isColorActive = step >= 3;
-  const currentCopy = copyByStep[step] || [];
+
+  // 颜色盘：第一色确认后显示第一色，两色齐备后双色混合
+  const diskColors = useMemo(() => {
+    if (secondColor?.hex) return [secondColor.hex, firstColor?.hex];
+    if (firstColor?.hex) return [firstColor.hex];
+    return [];
+  }, [firstColor, secondColor]);
+
+  const showColor = firstColor !== null;
 
   return (
     <section className="act2">
       <img className="act2__bg" src={bgUrl} alt="" draggable="false" />
 
+      {/* ── 中央颜色盘 ── */}
       <div className="act2__center">
-        <div className={["act2__disk", isColorActive ? "has-color" : "is-white"].join(" ")}>
-          {isColorActive && diskColors.length > 0 && (
+        <div className={["act2__disk", showColor ? "has-color" : "is-white"].join(" ")}>
+          {showColor && diskColors.length > 0 && (
             <LiquidChrome
               colorA={hexToNorm(diskColors[0])}
               colorB={hexToNorm(diskColors[1] || diskColors[0])}
@@ -128,17 +95,113 @@ export default function Act2ColorSeeking({
         </div>
         <img className="act2__diskFrame" src={diskFrameUrl} alt="" draggable="false" />
         <img className="act2__orbitRing" src={orbitRingUrl} alt="" draggable="false" />
-      </div>
 
-      <div className="act2__sideText" key={step}>
-        {currentCopy.map((line, index) => (
-          <div className="act2__sideTextLine" key={`${step}-${index}`}>
-            {line}
+        {/* ── 检测框 ── */}
+        <div className={[
+          "act2__detectBox",
+          isDetecting && "act2__detectBox--active",
+          isDetecting && stableColorName && "act2__detectBox--stable",
+          isDone && "act2__detectBox--done",
+        ].filter(Boolean).join(" ")}>
+          <div className="act2__detectBoxInner">
+            {/* 四角 */}
+            <span className="act2__detectCorner act2__detectCorner--tl" />
+            <span className="act2__detectCorner act2__detectCorner--tr" />
+            <span className="act2__detectCorner act2__detectCorner--bl" />
+            <span className="act2__detectCorner act2__detectCorner--br" />
+
+            {/* 轮次标记 */}
+            {!isDone && (
+              <div className="act2__roundBadge">{round}/2</div>
+            )}
+
+            {/* 已完成的颜色色块 */}
+            {firstColor && (
+              <div className="act2__swatchRow">
+                <div className="act2__miniSwatch" style={{ background: firstColor.hex }}>
+                  <span className="act2__miniSwatchCheck">✓</span>
+                </div>
+                <span className="act2__miniSwatchName">{firstColor.name}</span>
+              </div>
+            )}
+            {secondColor && (
+              <div className="act2__swatchRow act2__swatchRow--second">
+                <div className="act2__miniSwatch" style={{ background: secondColor.hex }}>
+                  <span className="act2__miniSwatchCheck">✓</span>
+                </div>
+                <span className="act2__miniSwatchName">{secondColor.name}</span>
+              </div>
+            )}
+
+            {/* 检测进度 */}
+            {isDetecting && (
+              <div className="act2__detectProgress">
+                {stableColorName ? (
+                  <>
+                    <span className="act2__detectLabel">{stableColorName}</span>
+                    <span className="act2__detectTimer">
+                      {Math.max(0, confirmSeconds - stableSeconds).toFixed(1)}s
+                    </span>
+                  </>
+                ) : (
+                  <span className="act2__detectLabel act2__detectLabel--dim">识别中……</span>
+                )}
+              </div>
+            )}
+
+            {/* 等待按 R */}
+            {!isDetecting && !isDone && (
+              <div className="act2__detectHint">
+                {firstColor ? (
+                  <>
+                    <span className="act2__detectHintKey">R</span>
+                    <span className="act2__detectHintText">再寻一色，按 R 键开始</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="act2__detectHintKey">R</span>
+                    <span className="act2__detectHintText">将物品放入框内，按 R 键开始</span>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* 两色完成 */}
+            {isDone && (
+              <div className="act2__detectDone">
+                <span className="act2__detectDoneText">两色相遇</span>
+              </div>
+            )}
           </div>
-        ))}
+        </div>
       </div>
 
-      {/* 四周飘动 icon — 同第零幕 */}
+      {/* ── 右侧文字 ── */}
+      <div className="act2__sideText">
+        {isDone ? (
+          <>
+            <div className="act2__sideTextLine">{firstColor?.name}与{secondColor?.name}相遇，</div>
+            <div className="act2__sideTextLine">像山门灯火照见夜色。</div>
+          </>
+        ) : firstColor ? (
+          <>
+            <div className="act2__sideTextLine">一缕{firstColor.name}浮出光面，</div>
+            <div className="act2__sideTextLine">再寻一色，让它们相遇。</div>
+          </>
+        ) : isDetecting ? (
+          <>
+            <div className="act2__sideTextLine">让我看看……</div>
+            <div className="act2__sideTextLine">这件东西里藏着怎样的颜色。</div>
+          </>
+        ) : (
+          <>
+            <div className="act2__sideTextLine">请将随身之物靠近光中。</div>
+            <div className="act2__sideTextLine">让它替你说话。</div>
+          </>
+        )}
+      </div>
+
+      {/* ── 四周飘动 icon ── */}
       <div className="act2__icons" aria-hidden="true">
         {floatingIcons.map((item) => (
           <img

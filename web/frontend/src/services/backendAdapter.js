@@ -33,6 +33,20 @@ export function normalizeBackendMessage(payload) {
         confidence: 1.0,
       };
 
+    // ---- Color detection start / progress → color_detection_active / color_detect_progress ----
+    case "color_detection_active":
+      return {
+        type: MESSAGE_TYPES.COLOR_DETECTION_ACTIVE,
+      };
+
+    case "color_detect_progress":
+      return {
+        type: MESSAGE_TYPES.COLOR_DETECT_PROGRESS,
+        stableColor: asStr(payload.stable_color),
+        elapsed: asNum(payload.elapsed),
+        confirmSeconds: asNum(payload.confirm_seconds, 3),
+      };
+
     // ---- Color extraction / fallback → system_log ----
     case "color_extraction_start":
     case "object_color_failed":
