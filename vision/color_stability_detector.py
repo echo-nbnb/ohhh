@@ -55,7 +55,8 @@ class ColorStabilityDetector:
         self._stable_result = None
         self._stable_since = time.time()
         self._last_result = None
-        self._confirmed = None
+        self._confirmed = None  # reset each start()
+        self._last_box = (0, 0, 0, 0)
 
     def stop(self) -> None:
         self._active = False

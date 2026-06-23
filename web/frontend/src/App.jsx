@@ -316,7 +316,7 @@ export default function App() {
     if (fallbackTimerRef.current) { clearTimeout(fallbackTimerRef.current); fallbackTimerRef.current = null; }
   }, [clearTimers]);
 
-  // ── Act3 sketch recognition ──
+  // ── Act3 sketch recognition（live 模式等后端手势识别）──
   const recognizeSketch = useCallback(async (payload) => {
     console.log("[App] recognizeSketch — mode:", mode, "cached:", latestRef.current.objectResult?.name);
     if (mode === "demo") {
@@ -326,12 +326,28 @@ export default function App() {
       setObjectResult(result);
       return { label: result.name, description: [result.reason], stylizedImageUrl: result.stylizedImageUrl };
     }
+    // Live 模式：等后端 object_recognized 消息（手势识别）
     const cached = latestRef.current.objectResult;
-    if (cached) return { label: cached.name, description: [cached.reason || `你画下了${cached.name}。`], stylizedImageUrl: cached.stylizedImageUrl || `/src/assets/act3/objects/${cached.name}.png` };
-    await new Promise(r => setTimeout(r, 1500));
-    const retry = latestRef.current.objectResult;
-    if (retry) return { label: retry.name, description: [retry.reason || `你画下了${retry.name}。`], stylizedImageUrl: retry.stylizedImageUrl || `/src/assets/act3/objects/${retry.name}.png` };
-    return { label: "石桥", description: ["你画下了一个意象。"], stylizedImageUrl: "/src/assets/act3/objects/石桥.png" };
+    if (cached) {
+      console.log("[App] recognizeSketch — using cached objectResult:", cached.name);
+      return { label: cached.name, description: [cached.reason || `你画下了${cached.name}。`], stylizedImageUrl: cached.stylizedImageUrl || `/src/assets/act3/objects/${cached.name}.png` };
+    }
+    // 等后端识别结果（最多等 5s）
+    for (let i = 0; i < 50; i++) {
+      await new Promise(r => setTimeout(r, 200));
+      const updated = latestRef.current.objectResult;
+      if (updated) {
+        console.log("[App] recognizeSketch — got backend result:", updated.name);
+        return { label: updated.name, description: [updated.reason || `你画下了${updated.name}。`], stylizedImageUrl: updated.stylizedImageUrl || `/src/assets/act3/objects/${updated.name}.png` };
+      }
+    }
+    // 超时：从 48 物象随机（不再是固定"石桥"）
+    const all = ["东方红广场","中国书院博物馆","书卷","书架","书案","匾额","古树","古籍","图书馆","墨锭","学位帽","实验室","屋脊","山石","岳麓书院","岳麓山","操场","教学楼","显微镜","林荫道","校徽","校门","楹联","毛笔","湖南大学大礼堂","湘江","爱晚亭","牌楼路","白鹤泉","石桥","石阶","砚台","碑刻","窗格","竹林","竹简","笔记本","线装书","经卷","自卑亭","荣誉证书","讲堂","设计院楼","赫曦台","长廊","院墙","麓山南路","黑板"];
+    const fb = all[Math.floor(Math.random() * all.length)];
+    console.log("[App] recognizeSketch — timeout, random fallback:", fb);
+    const fbResult = { name: fb, reason: `你画下了${fb}。`, stylizedImageUrl: `/src/assets/act3/objects/${fb}.png` };
+    setObjectResult(fbResult);
+    return { label: fb, description: [fbResult.reason], stylizedImageUrl: fbResult.stylizedImageUrl };
   }, [mode]);
 
   // ── Act4 spirit match ──

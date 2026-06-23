@@ -398,115 +398,133 @@ class HeuristicPredictor:
     实际部署时替换为 ONNX 模型推理。
     """
 
-    # 特征 → QuickDraw 类别映射（只使用 QUICKDRAW_TO_OBJECT 中存在的类别）
-    FEATURE_CATEGORIES = {
-        "vertical_line":   ["tree", "lighthouse", "pencil", "line"],
-        "horizontal_line": ["river", "bridge", "line", "sailboat"],
-        "circle":          ["sun", "clock", "face", "circle", "pond"],
-        "triangle":        ["mountain", "triangle", "house"],
-        "rectangle":       ["house", "book", "square", "door"],
-        "curve":           ["river", "cloud", "mountain", "ocean"],
-        "zigzag":          ["stairs", "zigzag", "mountain"],
-        "complex":         ["house", "castle", "tree", "flower"],
-    }
+    # 所有可用的 QuickDraw 类别（确保每个都能被命中）
+    ALL_QD_CATEGORIES = sorted(QUICKDRAW_TO_OBJECT.keys())
 
     def predict(self, points: List[Tuple[float, float]]) -> Dict[str, float]:
-        """基于轨迹几何特征返回 QuickDraw 类别概率（模拟）"""
+        """基于轨迹几何特征返回 QuickDraw 类别概率"""
+        import random
         if len(points) < 3:
-            return {"circle": 0.5, "line": 0.3, "square": 0.2}
+            return {"circle": 0.3, "line": 0.25, "square": 0.2, "triangle": 0.15, "star": 0.1}
 
         pts = np.array(points, dtype=np.float32)
+        jitter = lambda: random.uniform(-0.05, 0.05)
+        n = len(pts)
 
-        # 特征提取
-        min_xy = pts.min(axis=0)
-        max_xy = pts.max(axis=0)
+        # ── 多维特征提取 ──
+        min_xy, max_xy = pts.min(axis=0), pts.max(axis=0)
         span = max_xy - min_xy
         w, h = max(span[0], 1e-6), max(span[1], 1e-6)
-        aspect_ratio = w / h
+        aspect = w / h
+        area_ratio = (w * h) / (self.size * self.size)  # bbox 占画布比例
 
-        # 闭合性：起止点距离 / 总路径长度
+        # 闭合性
         start_end_dist = np.linalg.norm(pts[-1] - pts[0])
-        total_length = sum(np.linalg.norm(pts[i+1] - pts[i]) for i in range(len(pts)-1))
-        closedness = 1.0 - min(1.0, start_end_dist / max(total_length * 0.3, 1e-6))
+        total_len = sum(np.linalg.norm(pts[i+1] - pts[i]) for i in range(n-1))
+        closed = 1.0 - min(1.0, start_end_dist / max(total_len * 0.25, 1e-6))
 
-        # 方向变化次数
-        if len(pts) >= 3:
-            dirs = np.diff(pts, axis=0)
-            angles = np.arctan2(dirs[:, 1], dirs[:, 0])
-            angle_diffs = np.abs(np.diff(angles))
-            direction_changes = np.sum(angle_diffs > math.radians(30))
-        else:
-            direction_changes = 0
+        # 方向变化
+        dirs = np.diff(pts, axis=0)
+        angles = np.arctan2(dirs[:, 1], dirs[:, 0])
+        angle_d = np.abs(np.diff(angles))
+        turns = np.sum(angle_d > math.radians(25))
+        total_angle = np.sum(angle_d)  # 总转角
 
-        # 到中心点的平均距离（判断是否为圆）
+        # 中心距离方差（圆形判断）
         center = (min_xy + max_xy) / 2.0
-        distances = np.linalg.norm(pts - center, axis=1)
-        dist_std = np.std(distances) / max(np.mean(distances), 1e-6)
+        dists = np.linalg.norm(pts - center, axis=1)
+        dist_std = np.std(dists) / max(np.mean(dists), 1e-6)
+
+        # 填充密度 = 轨迹点数 / bbox面积
+        fill_density = n / max(w * h, 1.0)
+
+        # 曲率：相邻三点构成的转角
+        curvatures = []
+        for i in range(1, n-1):
+            v1 = pts[i] - pts[i-1]; v2 = pts[i+1] - pts[i]
+            n1 = np.linalg.norm(v1); n2 = np.linalg.norm(v2)
+            if n1 > 1e-6 and n2 > 1e-6:
+                cos_a = np.clip(np.dot(v1, v2) / (n1 * n2), -1, 1)
+                curvatures.append(math.acos(cos_a))
+        mean_curv = np.mean(curvatures) if curvatures else 0
 
         probs = {}
-        # 引入微量随机抖动，避免相同轨迹总是同一结果
-        import random
-        jitter = lambda: random.uniform(-0.03, 0.03)
+        branch = "?"
 
-        # 闭合 + 低距离方差 → 圆形
-        if closedness > 0.6 and dist_std < 0.3:
-            probs["circle"] = 0.6 + jitter()
-            probs["face"] = 0.2 + jitter()
-            probs["sun"] = 0.15 + jitter()
-            probs["pond"] = 0.1 + jitter()
-        # 低闭合 + 宽>高 → 横线/河流/桥梁
-        elif aspect_ratio > 1.8 and direction_changes < 5:
-            probs["river"] = 0.4 + jitter()
-            probs["line"] = 0.3 + jitter()
-            probs["bridge"] = 0.2 + jitter()
-            probs["ocean"] = 0.1 + jitter()
-        # 低闭合 + 高>宽 → 竖线/树/塔
-        elif aspect_ratio < 0.5 and direction_changes < 5:
-            probs["tree"] = 0.35 + jitter()
-            probs["lighthouse"] = 0.25 + jitter()
-            probs["line"] = 0.2 + jitter()
-            probs["pencil"] = 0.15 + jitter()
-        # 多方向变化 + 低闭合 → 锯齿/楼梯/山
-        elif direction_changes >= 5 and closedness < 0.3:
-            probs["stairs"] = 0.35 + jitter()
-            probs["zigzag"] = 0.25 + jitter()
-            probs["mountain"] = 0.2 + jitter()
-            probs["triangle"] = 0.15 + jitter()
-        # 多方向变化 + 有闭合 → 房屋/城堡/书
-        elif direction_changes >= 5 and closedness > 0.3:
-            probs["house"] = 0.30 + jitter()
-            probs["castle"] = 0.25 + jitter()
-            probs["book"] = 0.20 + jitter()
-            probs["square"] = 0.15 + jitter()
-            probs["tree"] = 0.10 + jitter()
-        # 中等方向变化 + 非极端宽高比 → 多种可能
-        elif 3 <= direction_changes <= 8 and 0.5 <= aspect_ratio <= 2.0:
-            probs["house"] = 0.25 + jitter()
-            probs["tree"] = 0.18 + jitter()
-            probs["book"] = 0.18 + jitter()
-            probs["square"] = 0.14 + jitter()
-            probs["mountain"] = 0.10 + jitter()
-            probs["flower"] = 0.08 + jitter()
-            probs["castle"] = 0.07 + jitter()
-        # 低方向变化 + 曲线 → 河流/云/山
-        elif direction_changes >= 3:
-            probs["river"] = 0.3 + jitter()
-            probs["cloud"] = 0.25 + jitter()
-            probs["mountain"] = 0.25 + jitter()
-            probs["ocean"] = 0.15 + jitter()
-        # 默认
+        # ── 分类: 10个分支，覆盖广泛 ──
+
+        if n < 8:
+            branch = "tiny"
+            # 极简笔画 → 单线/点状
+            if aspect > 2.5:
+                branch = "tiny-h"; probs = {"line": 0.45, "river": 0.15, "bridge": 0.12, "pencil": 0.08, "sailboat": 0.05, "knife": 0.05, "fork": 0.04, "spoon": 0.03, "trumpet": 0.03}
+            elif aspect < 0.4:
+                branch = "tiny-v"; probs = {"line": 0.3, "tree": 0.2, "pencil": 0.15, "lighthouse": 0.1, "streetlight": 0.08, "microphone": 0.07, "knife": 0.05, "spoon": 0.05}
+            else:
+                branch = "tiny-sq"; probs = {"line": 0.25, "circle": 0.2, "pencil": 0.15, "star": 0.12, "key": 0.08, "cup": 0.07, "knife": 0.07, "cell phone": 0.06}
+
+        elif closed > 0.55 and dist_std < 0.35:
+            branch = "round"
+            if area_ratio < 0.15:
+                branch = "round-sm"; probs = {"circle": 0.3, "sun": 0.15, "pond": 0.12, "clock": 0.1, "face": 0.08, "wheel": 0.05, "compass": 0.05, "cup": 0.05, "coffee cup": 0.04, "headphones": 0.03, "eye": 0.03}
+            elif area_ratio < 0.4:
+                branch = "round-md"; probs = {"circle": 0.2, "face": 0.15, "sun": 0.12, "clock": 0.1, "pond": 0.08, "soccer ball": 0.07, "baseball": 0.05, "hat": 0.05, "cup": 0.05, "wine bottle": 0.04, "light bulb": 0.04, "headphones": 0.03, "camera": 0.02}
+            else:
+                branch = "round-lg"; probs = {"circle": 0.18, "face": 0.12, "sun": 0.1, "clock": 0.08, "pond": 0.08, "wheel": 0.07, "soccer ball": 0.06, "basketball": 0.06, "eye": 0.05, "light bulb": 0.05, "cup": 0.05, "hat": 0.04, "headphones": 0.03, "binoculars": 0.03}
+
+        elif closed > 0.4 and turns >= 3 and aspect < 2.5 and aspect > 0.4:
+            branch = "polygon"
+            if aspect > 1.5:
+                branch = "poly-w"; probs = {"book": 0.22, "house": 0.16, "square": 0.12, "door": 0.1, "envelope": 0.08, "calendar": 0.07, "suitcase": 0.06, "cell phone": 0.05, "basket": 0.05, "backpack": 0.04, "camera": 0.03, "piano": 0.02}
+            elif turns >= 6:
+                branch = "poly-cpx"; probs = {"house": 0.18, "castle": 0.14, "book": 0.12, "church": 0.1, "square": 0.09, "computer": 0.07, "television": 0.07, "backpack": 0.06, "basket": 0.05, "camera": 0.04, "binoculars": 0.04, "piano": 0.04}
+            else:
+                branch = "poly-sq"; probs = {"house": 0.24, "square": 0.16, "book": 0.14, "door": 0.1, "castle": 0.08, "church": 0.05, "fence": 0.05, "basket": 0.05, "computer": 0.04, "television": 0.03, "backpack": 0.03, "camera": 0.03}
+
+        elif turns >= 8 and closed < 0.3:
+            branch = "zigzag"
+            probs = {"stairs": 0.26, "zigzag": 0.2, "mountain": 0.16, "triangle": 0.1, "star": 0.08, "diamond": 0.07, "guitar": 0.05, "violin": 0.04, "trumpet": 0.04}
+
+        elif mean_curv > 0.5 and turns >= 3:
+            branch = "curvy"
+            if closed > 0.2:
+                branch = "curvy-cl"; probs = {"flower": 0.25, "cloud": 0.18, "bush": 0.15, "tree": 0.12, "cactus": 0.08, "leaf": 0.07, "guitar": 0.05, "violin": 0.04, "basket": 0.03, "headphones": 0.03}
+            else:
+                branch = "curvy-op"; probs = {"river": 0.22, "cloud": 0.2, "mountain": 0.16, "ocean": 0.12, "sailboat": 0.07, "snake": 0.06, "guitar": 0.05, "violin": 0.04, "trumpet": 0.04, "microphone": 0.04}
+
+        elif aspect > 2.0 and turns < 5:
+            branch = "wide"
+            if closed < 0.15:
+                branch = "wide-op"; probs = {"river": 0.3, "line": 0.16, "bridge": 0.14, "ocean": 0.1, "sailboat": 0.07, "train": 0.06, "knife": 0.05, "spoon": 0.04, "fork": 0.04, "trumpet": 0.04}
+            else:
+                branch = "wide-cl"; probs = {"bridge": 0.2, "river": 0.16, "line": 0.12, "bus": 0.1, "car": 0.08, "bicycle": 0.07, "train": 0.05, "ambulance": 0.05, "piano": 0.05, "cell phone": 0.04, "spoon": 0.04, "fork": 0.04}
+
+        elif aspect < 0.5 and turns < 5:
+            branch = "tall"
+            probs = {"tree": 0.24, "lighthouse": 0.16, "line": 0.14, "pencil": 0.1, "streetlight": 0.08, "tower": 0.06, "cactus": 0.05, "microphone": 0.05, "knife": 0.04, "wine bottle": 0.04, "spoon": 0.04}
+
+        elif fill_density > 0.003 and turns >= 5:
+            branch = "dense"
+            probs = {"grass": 0.22, "bush": 0.2, "tree": 0.15, "flower": 0.1, "leaf": 0.08, "cloud": 0.07, "cactus": 0.05, "basket": 0.05, "guitar": 0.04, "violin": 0.04}
+
         else:
-            probs["house"] = 0.18 + jitter()
-            probs["tree"] = 0.18 + jitter()
-            probs["book"] = 0.18 + jitter()
-            probs["line"] = 0.12 + jitter()
-            probs["circle"] = 0.12 + jitter()
-            probs["river"] = 0.10 + jitter()
-            probs["mountain"] = 0.07 + jitter()
-            probs["flower"] = 0.05 + jitter()
+            branch = "default"
+            probs = {
+                "house": 0.1, "tree": 0.08, "book": 0.06, "line": 0.05,
+                "circle": 0.05, "river": 0.04, "mountain": 0.04, "flower": 0.04,
+                "castle": 0.04, "square": 0.03, "sun": 0.03, "pencil": 0.03,
+                "stairs": 0.03, "cloud": 0.03, "bridge": 0.03, "bush": 0.03,
+                "door": 0.02, "star": 0.02, "zigzag": 0.02, "leaf": 0.02,
+                "face": 0.02, "clock": 0.02, "key": 0.01, "cup": 0.01,
+                "camera": 0.01, "basket": 0.01, "guitar": 0.01, "piano": 0.01,
+                "cell phone": 0.01, "headphones": 0.01, "microphone": 0.01,
+                "knife": 0.01, "spoon": 0.01, "fork": 0.01, "hat": 0.01,
+            }
 
-        # 去掉负值，归一化
-        probs = {k: max(0.01, v) for k, v in probs.items()}
+        print(f"  [Heuristic] n={n} aspect={aspect:.2f} closed={closed:.2f} turns={turns} curv={mean_curv:.2f} fill={fill_density:.4f} → branch={branch}")
+
+        # 对每个概率加随机 jitter 并确保为正
+        probs = {k: max(0.005, v + jitter()) for k, v in probs.items()}
         total = sum(probs.values())
         return {k: v / total for k, v in probs.items()}
 
@@ -603,11 +621,23 @@ class SketchRecognizer:
         else:
             qd_probs = self.heuristic.predict(trajectory)
 
+        # DEBUG
+        top_qd = sorted(qd_probs.items(), key=lambda x: -x[1])[:5]
+        print(f"  [Sketch] top QD: {[(c, round(p,3)) for c,p in top_qd]}")
+
         # 3. QuickDraw → 物象映射
         results = self.mapper.map_predictions(qd_probs)
 
+        # DEBUG
+        if results:
+            print(f"  [Sketch] before weight: {[(r.entity_name, round(r.score,3)) for r in results[:5]]}")
+
         # 4. 颜色上下文加权
         results = self.weighter.apply(results, color)
+
+        # DEBUG
+        if results:
+            print(f"  [Sketch] after weight(color={color}): {[(r.entity_name, round(r.score,3)) for r in results[:5]]}")
 
         return results[:self.config.top_k]
 

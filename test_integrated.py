@@ -1166,89 +1166,68 @@ class IntegratedServer:
 
                 self._prev_hand_detected = True
 
-                # ── 颜色确认后手出现即画 ──
+                # ── 手势绘画：FSM 检测手势 → 食指画线 / 握拳确认 ──
                 if self.main_client and self._color_done:
-                    if not self.fsm.is_drawing:
-                        # 直接设置 mode + sub_state，不用 _transition_to
-                        self.fsm.mode = GestureMode.DRAWING
-                        self.fsm.drawing_sub = DrawingSubState.TRACKING
-                        self._send_main({"type": "drawing_start", "message": "开始绘画"})
-                    index_tip = fingertips[1]
-                    # 归一化到 0-1 + 左右镜像（摄像头镜像，用户左右一致）
-                    ow, oh = self.hand_tracker.output_size
-                    self._send_main({"type": "drawing_point",
-                                     "x": 1.0 - index_tip[0] / max(ow, 1),
-                                     "y": index_tip[1] / max(oh, 1)})
+                    if self.fsm.is_drawing:
+                        # FSM 检测到食指伸出 → DRAWING.TRACKING → 发送画点
+                        index_tip = fingertips[1]
+                        ow, oh = self.hand_tracker.output_size
+                        self._send_main({"type": "drawing_point",
+                                         "x": 1.0 - index_tip[0] / max(ow, 1),
+                                         "y": index_tip[1] / max(oh, 1)})
                 self._hand_lost_frames = 0
 
-                # ── 可视化（仅在非 --no-display 模式） ──
+                # ── 可视化 ──
                 if not self.no_display:
                     for i, lm in enumerate(hand_lm):
                         px, py = int(lm.x * w), int(lm.y * h)
-                        color = (0, 255, 0) if i % 4 == 0 else (0, 200, 0)
-                        cv2.circle(display, (px, py), 4, color, -1)
+                        clr = (0, 255, 0) if i % 4 == 0 else (0, 200, 0)
+                        cv2.circle(display, (px, py), 4, clr, -1)
                     for a, b in HAND_CONNECTIONS:
                         pt1 = (int(hand_lm[a].x * w), int(hand_lm[a].y * h))
                         pt2 = (int(hand_lm[b].x * w), int(hand_lm[b].y * h))
                         cv2.line(display, pt1, pt2, (0, 255, 0), 1)
-
-                    cv2.putText(display, f"Mode: {self.fsm.mode.value}", (10, 30),
+                    # 绘制轨迹
+                    if self.fsm.is_drawing and len(self.fsm.trajectory) >= 2:
+                        pts = [(int(p[0] * w), int(p[1] * h)) for p in self.fsm.trajectory]
+                        for i in range(len(pts)-1):
+                            cv2.line(display, pts[i], pts[i+1], (0, 255, 255), 2)
+                    # 状态文字
+                    gesture = self.fsm.current_gesture.value if self.fsm.current_gesture else "?"
+                    cv2.putText(display, f"Gesture: {gesture}", (10, 30),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                    cv2.putText(display, f"Sub: {self.fsm.sub_state}", (10, 60),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-                    cv2.putText(display, f"Color: {self.current_color}", (10, 90),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-                    u_status = "前端: OK" if self.main_client else "前端: --"
-                    u_color = (0, 255, 0) if self.main_client else (0, 0, 255)
-                    cv2.putText(display, u_status, (10, h - 20),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, u_color, 2)
+                    cv2.putText(display, f"Mode: {self.fsm.mode.value} | {self.fsm.sub_state}", (10, 60),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 100), 2)
+                    pts_str = f"Traj: {len(self.fsm.trajectory)}"
+                    cv2.putText(display, pts_str, (10, 90),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
+                    status = "前端: OK" if self.main_client else "前端: --"
+                    s_color = (0, 255, 0) if self.main_client else (0, 0, 255)
+                    cv2.putText(display, status, (10, h - 20),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, s_color, 2)
             else:
                 self.fsm.process(None, ts)
-                # Auto-commit drawing if hand lost for 3 seconds (需有足够轨迹点)
                 if self.fsm.is_drawing:
                     self._hand_lost_frames += 1
-                    if self._hand_lost_frames == 1:
-                        print(f"  [Auto] 开始计数: is_drawing={self.fsm.is_drawing} sub={self.fsm.drawing_sub} traj={len(self.fsm.trajectory)}")
                     if self._hand_lost_frames >= 30:
                         if len(self.fsm.trajectory) >= 10:
-                            print(f"  [Auto-Commit] 手部消失1秒提交，轨迹点={len(self.fsm.trajectory)}")
+                            print(f"  [Auto-Commit] 手离开1s，轨迹={len(self.fsm.trajectory)}")
                             traj = list(self.fsm.trajectory)
                             self._on_drawing_commit(traj)
                             self.fsm.trajectory.clear()
                             self.fsm._transition_to(GestureMode.GLOBAL, "IDLE")
                         else:
-                            print(f"  [Auto-Cancel] 轨迹点不足 ({len(self.fsm.trajectory)})，随机兜底")
+                            print(f"  [Auto-Cancel] 轨迹不足 ({len(self.fsm.trajectory)})")
                             self.fsm.trajectory.clear()
                             self.fsm._transition_to(GestureMode.GLOBAL, "IDLE")
-                            import random as _r
-                            _all = ["东方红广场","中国书院博物馆","书卷","书架","书案","匾额",
-                                    "古树","古籍","图书馆","墨锭","学位帽","实验室","屋脊","山石",
-                                    "岳麓书院","岳麓山","操场","教学楼","显微镜","林荫道",
-                                    "校徽","校门","楹联","毛笔","湖南大学大礼堂","湘江","爱晚亭",
-                                    "牌楼路","白鹤泉","石桥","石阶","砚台","碑刻","窗格",
-                                    "竹林","竹简","笔记本","线装书","经卷","自卑亭",
-                                    "荣誉证书","讲堂","设计院楼","赫曦台","长廊","院墙",
-                                    "麓山南路","黑板"]
-                            name = _r.choice(_all)
-                            self._send_main({
-                                "type": "object_recognized",
-                                "color": self.current_color,
-                                "object": {"name": name, "score": 0.35, "qd_category": "fallback"}
-                            })
-                            self._on_object_confirmed(name, 0.35, "fallback")
+                            self._send_main({"type": "drawing_cancelled",
+                                             "message": "没关系。有些图像，需要再画一次才会清晰。"})
                         self._hand_lost_frames = 0
-                # ── 无手部帧日志（每60帧一次）──
                 if self.frame_count - _last_log_frame >= 60:
                     _last_log_frame = self.frame_count
-                    _debug_log.info(
-                        f"FRAME#{self.frame_count} | hand=NO | "
-                        f"FSM={self.fsm.mode.value}/{self.fsm.sub_state} | "
-                        f"waiting_for_main_client={'YES' if not self.main_client else 'no'}"
-                    )
-                # ── Cover Flow: 手消失在识别区 ──
                 if self._prev_hand_detected:
                     self._prev_hand_detected = False
-                    self._hand_appeared_sent = False  # 重置，允许下次发送
+                    self._hand_appeared_sent = False
                     print("  [COVER_FLOW] hand_disappeared")
                 # ── Cover Flow: 手消失在识别区 ──
             if self.hand_tracker:
