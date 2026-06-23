@@ -33,6 +33,58 @@ sys.path.insert(0, ".")
 from vision.gesture_state_machine import GestureMode, DrawingSubState, ColorExtractionSubState  # noqa: E402
 from vision.color_stability_detector import ColorStabilityDetector  # noqa: E402
 
+# ── 物象旁白（筑景确认时发送）──
+_OBJECT_NARRATION = {
+    "东方红广场": "广场的石阶上，晨光正一寸一寸地醒来。你画下的，是无数人出发的地方。",
+    "中国书院博物馆": "这座博物馆里，藏着千年书院的呼吸。你看见了它的轮廓。",
+    "书卷": "纸页轻翻，墨香未散。一卷书，便是一座移动的书院。",
+    "书架": "木纹里藏着年岁，一格一格，像是时间的抽屉。你画下了知识栖居的地方。",
+    "书案": "一方书案，曾有人在此伏案终夜。你的指尖触碰了那个夜晚。",
+    "匾额": "匾额高悬，字迹如铁。那是先贤留给这片土地的一句承诺。",
+    "古树": "这棵树见过朱熹，见过张栻，见过无数来来往往的人。它的年轮里，是一部无声的校史。",
+    "古籍": "纸页泛黄，字迹斑驳。翻开它，就翻开了一段被遗忘的对话。",
+    "图书馆": "灯光照着无数书脊，像一座安静的城。你画下了那座城的大门。",
+    "墨锭": "墨在水中化开，像夜在黎明散开。你画下了时间的颜色。",
+    "学位帽": "穗子从右拨到左，一瞬之间，四年已过。你画下了一个人的抵达。",
+    "实验室": "试管里的液体微微泛光，数据在屏幕上跳动。真理正在被测量。",
+    "屋脊": "青瓦层叠，檐角微翘。屋脊之上，是千年的雨声和风声。",
+    "山石": "岳麓山的石头，每一块都听过书声。你画下了一块沉默的见证者。",
+    "岳麓书院": "惟楚有材，于斯为盛。你画下了一座千年学府的轮廓。",
+    "岳麓山": "山不高，却厚重如史。岳麓山上，每一棵树都知道一些故事。",
+    "操场": "跑道一圈一圈，汗水落在地上，长出了青春。你画下了一片奔跑的风景。",
+    "教学楼": "窗子里透出灯光，黑板上的公式还没擦。你画下了求知的日常。",
+    "显微镜": "镜下的世界，微小却宏大。你画下了发现的眼睛。",
+    "林荫道": "梧桐叶落下的时候，整条路都是金色的。你画下了一条通往秋天的小径。",
+    "校徽": "一个圆，一圈字，一座山，一条江。你画下的，是这里所有人的归属。",
+    "校门": "没有门的校门，却比任何门都重。走进来的人，都成了它的一部分。",
+    "楹联": "对联两侧，藏着对仗的智慧。你的笔触碰触了汉语的筋骨。",
+    "毛笔": "一支笔，在纸上走了一千年。你画下了书写本身。",
+    "湖南大学大礼堂": "穹顶之下，曾有无数人在这里聆听、思考、起立。你画下了声音的容器。",
+    "湘江": "江水千年如一日地流，带走了时间，留下了名字。你画下了一条会说话的河。",
+    "爱晚亭": "停车坐爱枫林晚。你画下了一座停驻在诗句里的亭子。",
+    "牌楼路": "一条路，从牌楼延伸到山脚。你画下了起点和终点之间的风景。",
+    "白鹤泉": "泉水清冽，传说有白鹤来饮。你画下了一汪有灵的水。",
+    "石桥": "石头连着石头，就是路。你画下的桥，连接了此岸和彼岸。",
+    "石阶": "一级一级，通向更高的地方。你画下了一段向上的旅程。",
+    "砚台": "墨在砚中，水在墨中。一方砚，是书写之前的那一秒空白。",
+    "碑刻": "石头上的文字，比纸上的活得更久。你画下了不朽。",
+    "窗格": "一格一格，把光分成细碎的金子。你画下了光的形状。",
+    "竹林": "风过竹林，沙沙作响。那是千年来同样的声音。",
+    "竹简": "竹片上的文字，比纸更古老。你画下了文明的初页。",
+    "笔记本": "一页一页，密密麻麻的字迹。你画下了一个人的努力。",
+    "线装书": "棉线穿过书脊，纸页对折。你画下了一种古老的装订方式。",
+    "经卷": "经文在手，墨色如新。一卷经，是信仰的重量。",
+    "自卑亭": "行远自迩，登高自卑。你画下了一座谦逊的建筑。",
+    "荣誉证书": "一张纸，盖着红章。那是努力被记得的方式。",
+    "讲堂": "三尺讲台，一方黑板。你画下了知识传递的现场。",
+    "设计院楼": "玻璃幕墙映着天光，建筑的图纸正在生成。你画下了创造的过程。",
+    "赫曦台": "台名取自日出，站在这里，能看到第一缕光。你画下了黎明。",
+    "长廊": "木柱排列，光影交错。长廊无尽，像时间本身。",
+    "院墙": "青灰色的墙，隔开喧嚣与寂静。你画下了一道守护的边界。",
+    "麓山南路": "从头走到尾，是一届又一届学生的四年。你画下了一条记忆的长河。",
+    "黑板": "黑板上的粉笔痕，擦去了又来。你画下了一个轮回。",
+}
+
 # ── DeepSeek API 配置 ──
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = "https://api.deepseek.com/chat/completions"
@@ -595,6 +647,7 @@ class IntegratedServer:
                 score = top['score']
                 qd_cat = top['qd_category']
                 self.fsm._recognized_object = (name, score, qd_cat)
+                _narration = _OBJECT_NARRATION.get(name, f"你画下了{name}。它的轮廓渐渐清晰。")
                 self._send_main({
                     "type": "object_recognized",
                     "color": self.current_color,
@@ -602,10 +655,11 @@ class IntegratedServer:
                         "name": name,
                         "score": round(score, 4),
                         "qd_category": qd_cat
-                    }
+                    },
+                    "narration": _narration,
                 })
                 _debug_log.info(f"DRAWING_COMMIT | object={name} score={score:.2f} | AUTO_CONFIRM")
-                print(f"  → 已识别物象: {name} ({score:.2f}) → 自动确认 → 触发人物")
+                print(f"  → 已识别物象: {name} ({score:.2f}) → {_narration[:30]}…")
                 # 自动确认物象，直接进入人物推荐+生成
                 self._on_object_confirmed(name, score, qd_cat)
             else:
@@ -782,9 +836,11 @@ class IntegratedServer:
 
             # ── 角色演绎 ──
             perf = llm_performance if llm_performance else [
-                f"你选择了{color}。",
-                f"你画下了{'、'.join(objs)}。",
-                "后来者，千年文脉在此刻与你相遇。"
+                f"你选择了{color}——那是千年书院里，午后的光影穿过窗格落下的颜色。",
+                f"你画下{'、'.join(objs)}，笔触里藏着这片土地的记忆。",
+                "我不知道你是谁，但我知道你在寻找。",
+                "在岳麓山下的每一块石头里，在湘江的每一道波纹里，",
+                "总有一个声音在等着后来的人。",
             ]
             self._send_main({
                 "type": "character_performance",
@@ -1421,12 +1477,17 @@ class _DirectCharacterBridge:
 
     def recommend(self, color: str, objects: List[str]) -> List[Dict]:
         try:
+            import random as _r
             results = self.recommender.recommend(
                 color=color, objects=objects,
-                selected_characters=[], use_llm=False, top_k=3
+                selected_characters=[], use_llm=False, top_k=5
             )
             if not results:
                 return []
+            # 从前5中随机选3，增加人物多样性
+            if len(results) > 3:
+                results = _r.sample(results, 3)
+                results.sort(key=lambda r: -r.score)
             candidates = [
                 {"name": r.name, "title": r.title,
                  "score": round(r.score, 4), "reason": r.reason,
@@ -1437,7 +1498,7 @@ class _DirectCharacterBridge:
                 "type": "character_candidates",
                 "candidates": candidates,
             })
-            print(f"  → 已发送人物推荐到前端")
+            print(f"  → 人物推荐: {[(c['name'], round(c['score'],2)) for c in candidates]}")
             return candidates
         except Exception as e:
             logger.error(f"CharacterBridge 推荐失败: {e}")
