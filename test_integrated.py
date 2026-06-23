@@ -480,6 +480,16 @@ class IntegratedServer:
                     threading.Thread(target=self._run_character_pipeline, args=(snapshot,), daemon=True, name="CharacterPipeline").start()
                 return
 
+            if msg_type == "request_postcard":
+                # 前端进入 Act5 → 请求明信片（重新生成发送）
+                print(f"  → 前端请求明信片")
+                color = data.get("color", self.current_color)
+                objects = data.get("objects", list(self.selected_objects))
+                obj_list = objects if objects else self.selected_objects
+                if obj_list:
+                    threading.Thread(target=self._generate_postcard_only, args=(color, obj_list), daemon=True).start()
+                return
+
             if msg_type == "start_color_extraction":
                 # 前端进入 Act2 → 发送提示，等 R 键
                 print("  → 前端进入 Act2，等待 R 键")
@@ -806,7 +816,8 @@ class IntegratedServer:
                 self._pipeline_running = False
                 return
 
-            top = candidates[0]
+            import random as _random
+            top = _random.choice(candidates)  # 随机选，不总是一个人
             print(f"  [Pipeline] top character: {top.get('name','?')} ({top.get('title','')}) score={top.get('score',0):.3f}")
             # ── 搜索阶段（Act4 转场 pacing）──
             self._send_main({
@@ -970,6 +981,49 @@ class IntegratedServer:
             self.fsm.trigger_color_extraction_start()
             self._pipeline_running = False
             _debug_log.info("STATE_RESET | 一轮完整流程结束，重置回 COLOR_EXTRACTION")
+
+    def _generate_postcard_only(self, color: str, objs: list):
+        """仅生成明信片（不跑完整人物管线），供前端 request_postcard 调用"""
+        try:
+            import random as _random
+            from rag.uploader import PostcardUploader
+            from PIL import Image, ImageDraw, ImageFont
+
+            all_palette = {"岳麓绿":"#496b4a","书院红":"#8d3d36","湘江蓝":"#3f7082","西迁黄":"#a9823e","校徽金":"#c3a45e","墨色":"#333936","梨黄":"#F0E440","桂黄":"#F2E700","澄蓝":"#355BFF"}
+            c1_hex = all_palette.get(color, "#496b4a")
+            others = [h for n, h in all_palette.items() if n != color]
+            c2_hex = others[_random.randint(0, len(others)-1)] if others else "#8d3d36"
+            font_lg = font_md = font_sm = None
+            for fp in [r"C:\Windows\Fonts\simhei.ttf", r"C:\Windows\Fonts\msyh.ttc", r"C:\Windows\Fonts\simsun.ttc"]:
+                if os.path.exists(fp):
+                    try:
+                        font_lg = ImageFont.truetype(fp, 64)
+                        font_md = ImageFont.truetype(fp, 38)
+                        font_sm = ImageFont.truetype(fp, 24)
+                        break
+                    except Exception:
+                        pass
+            if font_lg is None:
+                font_lg = font_md = font_sm = ImageFont.load_default()
+            W, H, M = 1200, 1600, 60
+            card = Image.new("RGB", (W, H), (252, 250, 246))
+            draw = ImageDraw.Draw(card)
+            bw = (W - 3 * M) // 2
+            draw.rectangle([M, M, M + bw, M + 280], fill=c1_hex)
+            draw.rectangle([M * 2 + bw, M, M * 2 + bw * 2, M + 280], fill=c2_hex)
+            draw.text((M + 16, M + 296), color, font=font_sm, fill=(100, 90, 80))
+            draw.text((M, M + 380), "你筑下的景", font=font_sm, fill=(140, 130, 120))
+            draw.text((M, M + 420), "、".join(objs), font=font_lg, fill=(45, 38, 30))
+            draw.text((M, M + 540), "你的千年色", font=font_sm, fill=(140, 130, 120))
+            draw.text((M, M + 620), f"湖南大学 · 寻麓千年色 · {datetime.now().strftime('%Y.%m.%d %H:%M')}", font=font_sm, fill=(150, 145, 140))
+            uploader = PostcardUploader()
+            result = uploader.upload(card)
+            self._send_main({"type": "postcard_result", "image_url": result["image_url"],
+                             "qr_base64": result["qr_base64"], "unique_id": result["unique_id"],
+                             "message": "扫码带走你的千年色。"})
+            print(f"  [Postcard] 已上传: {result['image_url']}")
+        except Exception as e:
+            print(f"  [Postcard] 失败: {e}")
 
     def _on_character_confirmed(self):
         print("  [FSM] 人物已确认!")

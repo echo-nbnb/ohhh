@@ -116,6 +116,7 @@ export default function App() {
   const [postcardImageUrl, setPostcardImageUrl] = useState(""); // postcard image URL
   const [act3Overlay, setAct3Overlay] = useState(null);    // Act3 canvas screenshot for overlay
   const postcardEnterTimeRef = useRef(0);    // when Act5 was entered
+  const wsSendRef = useRef(null);             // set after useWebSocket init
 
   // ── Act2 颜色检测状态 ──
   const [isDetecting, setIsDetecting] = useState(false);
@@ -294,8 +295,12 @@ export default function App() {
       setNarrative(mockGenerateNarrative({ color: colors[0], objectResult, matchedCharacter }));
     }
     setCurrentStage(STAGES.POSTCARD); setWaitingForStamp(false);
+    // 主动请求明信片（防止消息丢失）
+    const objs = imageryItems.map(i => i.name);
+    const c0 = colorsRef.current[0]?.name;
+    setTimeout(() => wsSendRef.current?.({ type: "request_postcard", color: c0, objects: objs }), 100);
     addLog("唤灵完成，进入第四幕：成色");
-  }, [addLog, mode, narrative, colors, objectResult, matchedCharacter]);
+  }, [addLog, mode, narrative, colors, objectResult, matchedCharacter, imageryItems]);
 
   // ── Reset ──
   const resetAll = useCallback(() => {
@@ -447,9 +452,9 @@ export default function App() {
           addLog("检测到握拳手势，开始入境");
           goToTransitionRef.current?.();
         }
-        // Live mode: fist on POSTCARD → restart (after min 10s to allow viewing)
+        // Live mode: fist on POSTCARD → restart (after 5s)
         if (message.gesture === "fist" && stageRef.current === STAGES.POSTCARD) {
-          if (Date.now() - postcardEnterTimeRef.current > 10000) {
+          if (Date.now() - postcardEnterTimeRef.current > 5000) {
             addLog("握拳重启");
             resetAll();
           }
@@ -563,6 +568,7 @@ export default function App() {
 
   const socket = useWebSocket(WS_URL, handleBackendPayload);
   const wsSend = socket.send;
+  wsSendRef.current = wsSend;  // for use in callbacks defined before socket
   useEffect(() => { socket.connect(); }, []); // auto-connect in live mode
 
   // Capture Act3 scene as overlay for Act4/Act5
