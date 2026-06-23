@@ -48,11 +48,17 @@ export function normalizeBackendMessage(payload) {
         confirmSeconds: asNum(payload.confirm_seconds, 3),
       };
 
+    // ---- Drawing start → drawing_start ----
+    case "drawing_start":
+      return {
+        type: MESSAGE_TYPES.DRAWING_START,
+        message: asStr(payload.message),
+      };
+
     // ---- Color extraction / fallback → system_log ----
     case "color_extraction_start":
     case "object_color_failed":
     case "clothing_color_failed":
-    case "drawing_start":
     case "drawing_cancelled":
     case "object_confirmed":
     case "objects_summary":
@@ -138,12 +144,14 @@ export function normalizeBackendMessage(payload) {
       };
     }
 
-    // ---- Character performance → system_log (不覆盖已设置的人物) ----
+    // ---- Character performance → 更新人物独白 ----
     case "character_performance":
       return {
-        type: MESSAGE_TYPES.SYSTEM_LOG,
-        level: "info",
-        message: asArr(payload.paragraphs).join(" "),
+        type: MESSAGE_TYPES.CHARACTER_MATCHED,
+        character: {
+          name: asStr(payload.character, ""),
+          monologue: asArr(payload.paragraphs ?? payload.performance),
+        },
       };
 
     // ---- Generation → narrative_generated ----

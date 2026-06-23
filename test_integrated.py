@@ -468,6 +468,18 @@ class IntegratedServer:
                 self._start_color_detect()
                 return
 
+            if msg_type == "trigger_character_pipeline":
+                # 前端确认 2 个物象 → 启动人物推荐管线
+                color = data.get("color", self.current_color)
+                objects = data.get("objects", list(self.selected_objects))
+                print(f"  → 前端触发人物管线: color={color} objects={objects}")
+                if not self._pipeline_running:
+                    self.selected_objects = list(objects)
+                    self._pipeline_running = True
+                    snapshot = {"color": color, "objects": objects}
+                    threading.Thread(target=self._run_character_pipeline, args=(snapshot,), daemon=True, name="CharacterPipeline").start()
+                return
+
             if msg_type == "start_color_extraction":
                 # 前端进入 Act2 → 发送提示，等 R 键
                 print("  → 前端进入 Act2，等待 R 键")
@@ -641,11 +653,20 @@ class IntegratedServer:
         if self.sketch_bridge:
             results = self.sketch_bridge.recognize(trajectory, self.current_color)
             if results:
-                # 取最优结果
-                top = results[0]  # {'name': ..., 'score': ..., 'qd_category': ...}
-                name = top['name']
-                score = top['score']
-                qd_cat = top['qd_category']
+                # 去重：已有同名物象 → 取下一个候选
+                top = results[0]
+                name, score, qd_cat = top['name'], top['score'], top['qd_category']
+                for r in results:
+                    if r['name'] not in self.selected_objects:
+                        name, score, qd_cat = r['name'], r['score'], r['qd_category']
+                        break
+                else:
+                    # 所有候选都已存在 → 从 qd_map 找同类不同名物象
+                    import random as _r
+                    _near = [n for n in _OBJECT_NARRATION if n not in self.selected_objects]
+                    if _near:
+                        name = _r.choice(_near)
+                        score, qd_cat = 0.30, "fallback"
                 self.fsm._recognized_object = (name, score, qd_cat)
                 _narration = _OBJECT_NARRATION.get(name, f"你画下了{name}。它的轮廓渐渐清晰。")
                 self._send_main({
@@ -660,20 +681,15 @@ class IntegratedServer:
                 })
                 _debug_log.info(f"DRAWING_COMMIT | object={name} score={score:.2f} | AUTO_CONFIRM")
                 print(f"  → 已识别物象: {name} ({score:.2f}) → {_narration[:30]}…")
-                # 自动确认物象，直接进入人物推荐+生成
                 self._on_object_confirmed(name, score, qd_cat)
             else:
-                # 识别结果为空 → 兜底随机物象
+                # 识别结果为空 → 兜底随机物象（排除已有）
                 import random as _r
-                _all = ["东方红广场","中国书院博物馆","书卷","书架","书案","匾额",
-                        "古树","古籍","图书馆","墨锭","学位帽","实验室","屋脊","山石",
-                        "岳麓书院","岳麓山","操场","教学楼","显微镜","林荫道",
-                        "校徽","校门","楹联","毛笔","湖南大学大礼堂","湘江","爱晚亭",
-                        "牌楼路","白鹤泉","石桥","石阶","砚台","碑刻","窗格",
-                        "竹林","竹简","笔记本","线装书","经卷","自卑亭",
-                        "荣誉证书","讲堂","设计院楼","赫曦台","长廊","院墙",
-                        "麓山南路","黑板"]
-                name = _r.choice(_all)
+                _all = list(_OBJECT_NARRATION.keys())
+                _avail = [n for n in _all if n not in self.selected_objects]
+                if not _avail:
+                    _avail = _all
+                name = _r.choice(_avail)
                 _qd_fb = {"古树":"tree","书卷":"book","石阶":"stairs","岳麓书院":"house",
                           "湘江":"river","爱晚亭":"castle","石桥":"bridge","竹林":"bush",
                           "林荫道":"tree","讲堂":"church","图书馆":"house","实验室":"computer",
@@ -777,9 +793,11 @@ class IntegratedServer:
         """后台线程：人物推荐 → LLM 独白/叙事 → 明信片生成 → 状态重置"""
         color = snapshot["color"]
         objs = snapshot["objects"]
+        print(f"  [Pipeline] START color={color} objs={objs}")
 
         try:
             if not self.character_bridge:
+                print(f"  [Pipeline] NO character_bridge, abort")
                 self._pipeline_running = False
                 return
 
@@ -789,6 +807,7 @@ class IntegratedServer:
                 return
 
             top = candidates[0]
+            print(f"  [Pipeline] top character: {top.get('name','?')} ({top.get('title','')}) score={top.get('score',0):.3f}")
             # ── 搜索阶段（Act4 转场 pacing）──
             self._send_main({
                 "type": "character_search_start",
@@ -830,9 +849,9 @@ class IntegratedServer:
                 # 叙事
                 nprompt = f"为「寻麓千年色」写一段诗意叙事。颜色：{color}，物象：{'、'.join(objs)}，回应者：{ch_name}（{ch_title}）。要求：1)4-5句 2)语言优美有古韵 3)融入颜色和物象意境 4)体现湖湘千年文脉。只输出叙事。"
                 llm_narrative = _ds(nprompt, 400).split("\n")
-                print(f"  [DeepSeek] 生成成功")
+                print(f"  [Pipeline] DeepSeek OK monologue={len(llm_performance)}lines narrative={len(llm_narrative)}lines")
             except Exception as e:
-                print(f"  [DeepSeek] 失败，用模板: {e}")
+                print(f"  [Pipeline] DeepSeek FAIL: {e}")
 
             # ── 角色演绎 ──
             perf = llm_performance if llm_performance else [
@@ -842,6 +861,7 @@ class IntegratedServer:
                 "在岳麓山下的每一块石头里，在湘江的每一道波纹里，",
                 "总有一个声音在等着后来的人。",
             ]
+            print(f"  [Pipeline] send character_performance ({len(perf)} lines)")
             self._send_main({
                 "type": "character_performance",
                 "character": "????",
@@ -856,8 +876,10 @@ class IntegratedServer:
                 "黄兴":"huangxing","蔡锷":"caie","曾国藩":"zenguofan","左宗棠":"zuozongtang",
                 "王阳明":"wangyangming","吕祖谦":"lvzuqian","宋教仁":"songjiaoreng",
                 "陈天华":"chengtianhua","何叔衡":"heshuheng",
+                "程颢":"chengjing","程颐":"chenyi","胡安国":"huanguo","罗洪先":"luohongxian",
             }
             pf = portrait_map.get(ch_name, "")
+            print(f"  [Pipeline] send character_revealed name={ch_name} portrait={pf}")
             self._send_main({
                 "type": "character_revealed",
                 "name": ch_name,
@@ -881,6 +903,7 @@ class IntegratedServer:
                 "paragraphs": narrative_text,
                 "context": {"color": color, "objects": objs, "character": ch_name}
             }
+            print(f"  [Pipeline] send generation_result title={gen_result['title']} paragraphs={len(narrative_text)}")
             self._send_main(gen_result)
 
             # ── 明信片生成 ──
@@ -1478,13 +1501,19 @@ class _DirectCharacterBridge:
     def recommend(self, color: str, objects: List[str]) -> List[Dict]:
         try:
             import random as _r
+            # 只推荐有头像的人物
+            _with_portrait = {"胡宏","李达","陆九渊","王夫之","杨昌济","张栻","周敦颐","朱熹",
+                              "黄兴","蔡锷","曾国藩","左宗棠","王阳明","吕祖谦","宋教仁",
+                              "陈天华","何叔衡","程颢","程颐","胡安国","罗洪先"}
             results = self.recommender.recommend(
                 color=color, objects=objects,
-                selected_characters=[], use_llm=False, top_k=5
+                selected_characters=[], use_llm=False, top_k=8
             )
+            # 过滤：只保留有头像的人物
+            results = [r for r in results if r.name in _with_portrait]
             if not results:
                 return []
-            # 从前5中随机选3，增加人物多样性
+            # 从前8中随机选3，增加多样性
             if len(results) > 3:
                 results = _r.sample(results, 3)
                 results.sort(key=lambda r: -r.score)

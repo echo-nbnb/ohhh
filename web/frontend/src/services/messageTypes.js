@@ -4,6 +4,7 @@ export const MESSAGE_TYPES = Object.freeze({
   COLOR_DETECTION_ACTIVE: "color_detection_active",
   COLOR_DETECT_PROGRESS: "color_detect_progress",
   GESTURE_STATE: "gesture_state",
+  DRAWING_START: "drawing_start",
   DRAWING_POINT: "drawing_point",
   OBJECT_RECOGNIZED: "object_recognized",
   CHARACTER_MATCHED: "character_matched",

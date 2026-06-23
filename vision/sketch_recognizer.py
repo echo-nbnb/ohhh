@@ -408,7 +408,7 @@ class HeuristicPredictor:
             return {"circle": 0.3, "line": 0.25, "square": 0.2, "triangle": 0.15, "star": 0.1}
 
         pts = np.array(points, dtype=np.float32)
-        jitter = lambda: random.uniform(-0.05, 0.05)
+        jitter = lambda: random.uniform(-0.10, 0.10)  # 增大抖动，相似轨迹产生不同结果
         n = len(pts)
 
         # ── 多维特征提取 ──

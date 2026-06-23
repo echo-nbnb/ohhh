@@ -316,38 +316,21 @@ export default function App() {
     if (fallbackTimerRef.current) { clearTimeout(fallbackTimerRef.current); fallbackTimerRef.current = null; }
   }, [clearTimers]);
 
-  // ── Act3 sketch recognition（live 模式等后端手势识别）──
+  // ── Act3 sketch recognition ──
   const recognizeSketch = useCallback(async (payload) => {
-    console.log("[App] recognizeSketch — mode:", mode, "cached:", latestRef.current.objectResult?.name);
-    if (mode === "demo") {
-      const validObjects = ["石桥","古树","书卷","岳麓书院","湘江","爱晚亭","碑刻","竹林","讲堂","石阶","岳麓山","长廊","东方红广场","中国书院博物馆","书架","书案","匾额","古籍","图书馆","墨锭","学位帽","实验室","屋脊","山石","操场","教学楼","显微镜","林荫道","校徽","校门","楹联","毛笔","湖南大学大礼堂","牌楼路","白鹤泉","砚台","窗格","竹简","笔记本","线装书","经卷","自卑亭","荣誉证书","设计院楼","赫曦台","院墙","麓山南路","黑板"];
-      const label = validObjects[Math.floor(Math.random() * validObjects.length)];
-      const result = { name: label, reason: `你画下了${label}。`, stylizedImageUrl: `/src/assets/act3/objects/${label}.png` };
-      setObjectResult(result);
-      return { label: result.name, description: [result.reason], stylizedImageUrl: result.stylizedImageUrl };
-    }
-    // Live 模式：等后端 object_recognized 消息（手势识别）
-    const cached = latestRef.current.objectResult;
-    if (cached) {
-      console.log("[App] recognizeSketch — using cached objectResult:", cached.name);
-      return { label: cached.name, description: [cached.reason || `你画下了${cached.name}。`], stylizedImageUrl: cached.stylizedImageUrl || `/src/assets/act3/objects/${cached.name}.png` };
-    }
-    // 等后端识别结果（最多等 5s）
-    for (let i = 0; i < 50; i++) {
-      await new Promise(r => setTimeout(r, 200));
-      const updated = latestRef.current.objectResult;
-      if (updated) {
-        console.log("[App] recognizeSketch — got backend result:", updated.name);
-        return { label: updated.name, description: [updated.reason || `你画下了${updated.name}。`], stylizedImageUrl: updated.stylizedImageUrl || `/src/assets/act3/objects/${updated.name}.png` };
-      }
-    }
-    // 超时：从 48 物象随机（不再是固定"石桥"）
-    const all = ["东方红广场","中国书院博物馆","书卷","书架","书案","匾额","古树","古籍","图书馆","墨锭","学位帽","实验室","屋脊","山石","岳麓书院","岳麓山","操场","教学楼","显微镜","林荫道","校徽","校门","楹联","毛笔","湖南大学大礼堂","湘江","爱晚亭","牌楼路","白鹤泉","石桥","石阶","砚台","碑刻","窗格","竹林","竹简","笔记本","线装书","经卷","自卑亭","荣誉证书","讲堂","设计院楼","赫曦台","长廊","院墙","麓山南路","黑板"];
-    const fb = all[Math.floor(Math.random() * all.length)];
-    console.log("[App] recognizeSketch — timeout, random fallback:", fb);
-    const fbResult = { name: fb, reason: `你画下了${fb}。`, stylizedImageUrl: `/src/assets/act3/objects/${fb}.png` };
-    setObjectResult(fbResult);
-    return { label: fb, description: [fbResult.reason], stylizedImageUrl: fbResult.stylizedImageUrl };
+    const all48 = ["东方红广场","中国书院博物馆","书卷","书架","书案","匾额","古树","古籍","图书馆","墨锭","学位帽","实验室","屋脊","山石","岳麓书院","岳麓山","操场","教学楼","显微镜","林荫道","校徽","校门","楹联","毛笔","湖南大学大礼堂","湘江","爱晚亭","牌楼路","白鹤泉","石桥","石阶","砚台","碑刻","窗格","竹林","竹简","笔记本","线装书","经卷","自卑亭","荣誉证书","讲堂","设计院楼","赫曦台","长廊","院墙","麓山南路","黑板"];
+    // 排除已确认的物象，保证两次不同
+    const used = usedObjectNamesRef.current;
+    const available = all48.filter(n => !used.includes(n));
+    const pool = available.length >= 2 ? available : all48;
+    const label = pool[Math.floor(Math.random() * pool.length)];
+    const reason = `你画下了${label}。`;
+    console.log("[App] recognizeSketch — mode:", mode, "used:", used, "picked:", label);
+    const imgUrl = `/src/assets/act3/objects/${label}.png`;
+    const result = { name: label, reason, stylizedImageUrl: imgUrl };
+    setObjectResult(result);
+    usedObjectNamesRef.current.push(label);
+    return { label, description: [reason], stylizedImageUrl: imgUrl };
   }, [mode]);
 
   // ── Act4 spirit match ──
@@ -480,6 +463,13 @@ export default function App() {
         }
         break;
 
+      case MESSAGE_TYPES.DRAWING_START:
+        // 新绘画开始 → 清除上一轮的识别缓存
+        setObjectResult(null);
+        drawPositionsRef.current = [];
+        addLog("开始新的绘画");
+        break;
+
       case MESSAGE_TYPES.DRAWING_POINT:
         // Coordinates are normalized (0-1), scale to viewport for canvas rendering
         const vw = window.innerWidth, vh = window.innerHeight;
@@ -492,10 +482,12 @@ export default function App() {
         liveObjectCountRef.current += 1;
         // Dedup object name: use ref (state may be stale)
         let objName = message.name;
+        let objReason = message.reason || message.narrative || `你画下了${objName}。`;
         if (usedObjectNamesRef.current.includes(objName)) {
-          const fallbacks = ["古树","书卷","石阶","岳麓书院","竹简","碑刻","讲堂","爱晚亭","石桥","长廊","匾额","竹林","东方红广场","古籍","线装书","经卷","墨锭","砚台","毛笔","窗格","院墙","屋脊","自卑亭","赫曦台","校门","林荫道","湘江","白鹤泉","山石","图书馆","书架","书案","学位帽","校徽","荣誉证书","笔记本","黑板"];
-          const unused = fallbacks.filter(n => !usedObjectNamesRef.current.includes(n));
+          const all48 = ["东方红广场","中国书院博物馆","书卷","书架","书案","匾额","古树","古籍","图书馆","墨锭","学位帽","实验室","屋脊","山石","岳麓书院","岳麓山","操场","教学楼","显微镜","林荫道","校徽","校门","楹联","毛笔","湖南大学大礼堂","湘江","爱晚亭","牌楼路","白鹤泉","石桥","石阶","砚台","碑刻","窗格","竹林","竹简","笔记本","线装书","经卷","自卑亭","荣誉证书","讲堂","设计院楼","赫曦台","长廊","院墙","麓山南路","黑板"];
+          const unused = all48.filter(n => !usedObjectNamesRef.current.includes(n));
           objName = unused[Math.floor(Math.random() * unused.length)];
+          objReason = `这个意象和你之前画下的不同。这是${objName}。`;
           console.log("[App] Object dedup: same name, fallback to", objName);
         }
         // Calculate position from accumulated drawing points
@@ -512,19 +504,20 @@ export default function App() {
         remoteDrawRef.current?.clear?.(); // clear remote canvas for next drawing
         usedObjectNamesRef.current.push(objName);
         const pointillistUrl = `/src/assets/act3/objects/${objName}.png`;
-        console.log("[App] OBJECT_RECOGNIZED:", objName, "count:", liveObjectCountRef.current, "pos:", position, "img:", pointillistUrl);
-        setObjectResult({ ...message, name: objName, stylizedImageUrl: pointillistUrl });
+        console.log("[App] OBJECT_RECOGNIZED:", objName, "reason:", objReason?.slice(0,30), "count:", liveObjectCountRef.current);
+        setObjectResult({ ...message, name: objName, reason: objReason, stylizedImageUrl: pointillistUrl });
         setImageryItems(prev => [...prev, {
           id: objName + liveObjectCountRef.current,
           name: objName,
-          description: [message.reason || `你画下了${objName}。`],
+          description: [objReason],
           imageUrl: pointillistUrl,
           className: prev.length === 0 ? "act5__imagery--bridge" : "act5__imagery--tree",
           position,
         }]);
         addLog(`筑景完成：线条被叙事化为${objName}`);
         if (mode === "live" && liveObjectCountRef.current >= 2) {
-          console.log("[App] 2 objects confirmed, auto-advancing to spirit in 4s");
+          console.log("[App] 2 objects confirmed, triggering character pipeline");
+          wsSend({ type: "trigger_character_pipeline", color: colorsRef.current[0]?.name, objects: imageryItems.map(i => i.name).concat([objName]) });
           addLog("两个意象已经落下，4秒后进入唤灵");
           setTimeout(() => goToSpiritRef.current?.(), 4000);
         }
@@ -592,7 +585,8 @@ export default function App() {
     }]);
     // Live mode: auto-advance after 2 objects
     if (mode === "live" && imageryItems.length + 1 >= 2) {
-      console.log("[App] 2 objects confirmed, auto-advancing to spirit");
+      console.log("[App] 2 objects confirmed, triggering character pipeline");
+      wsSend({ type: "trigger_character_pipeline", color: colorsRef.current[0]?.name, objects: imageryItems.map(i => i.name).concat([item.label]) });
       schedule(() => goToSpiritRef.current?.(), 2000);
     }
   }, [mode, imageryItems.length, schedule]);
