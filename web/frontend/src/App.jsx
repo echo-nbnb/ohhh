@@ -273,9 +273,10 @@ export default function App() {
       console.log("[App] goToDraw blocked — 等待后端 color_confirmed");
       return;
     }
-    console.log("[App] goToDraw → Act3");
+    const curColors = colorsRef.current;
+    console.log("[App] goToDraw → Act3, colors:", curColors.map(c => `${c.name}(${c.hex})`).join(", "));
     setCurrentStage(STAGES.DRAW); setIsAutoAdvancing(false);
-    addLog("择色完成，进入第二幕：筑景");
+    addLog(`择色完成: ${curColors.map(c => c.name).join("、")}，进入筑景`);
   }, [addLog]);
 
   const goToSpirit = useCallback(() => {
@@ -387,17 +388,19 @@ export default function App() {
           const round = message.round || 1;
           if (!found) break;
 
+          console.log(`[App] COLOR_DETECTED round=${round} name=${found.name} hex=${found.hex}`);
           if (round === 1) {
             setFirstColor({ hex: found.hex, name: found.name });
             setIsDetecting(false);  // 停检测，等用户再按 R
             setColors([found]);
             addLog(`第一色完成：${found.name}，等待第二色…`);
           } else {
+            const c0 = firstColor || colorsRef.current[0];
             setSecondColor({ hex: found.hex, name: found.name });
             setIsDetecting(false);
-            setColors(prev => [...prev, found]);
+            setColors(prev => { const next = [...prev, found]; console.log(`[App] setColors round2 ${prev.map(c=>c.name)} → ${next.map(c=>c.name)}`); return next; });
             colorConfirmedRef.current = true;
-            addLog(`第二色完成：${found.name}，两色齐备`);
+            addLog(`第二色完成：${found.name}，两色齐备: ${c0?.name}+${found.name}`);
           }
           break;
         }

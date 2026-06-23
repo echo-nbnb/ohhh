@@ -23,6 +23,7 @@ export function normalizeBackendMessage(payload) {
         colorName: asStr(payload.color),
         source: asStr(payload.source, "object"),
         confidence: asNum(payload.confidence),
+        round: asNum(payload.round, 1),
       };
 
     case "color_confirmed":
